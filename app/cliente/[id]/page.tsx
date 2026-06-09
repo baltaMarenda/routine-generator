@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ArrowLeft, FileSpreadsheet } from 'lucide-react'
@@ -12,6 +13,8 @@ import { EvaluationData, createEmptyEvaluation } from '@/lib/evaluation-types'
 import { RoutineData, createInitialRoutineData } from '@/lib/types'
 import { exportEvaluationToExcel } from '@/lib/evaluation-export'
 import { exportRoutineToExcel } from '@/lib/excel-export'
+import { AuthButton, SyncStatus } from '@/components/auth-button'
+import { readFromDrive, writeToDrive } from '@/lib/drive-sync'
 
 interface ClientPageProps {
   params: Promise<{ id: string }>
@@ -23,57 +26,72 @@ export default function ClientPage({ params }: ClientPageProps) {
   const clientName = searchParams.get('name') || 'Cliente'
   const clientId = resolvedParams.id
 
+  const { data: session } = useSession()
   const [evaluation, setEvaluation] = useState<EvaluationData>(createEmptyEvaluation())
   const [routine, setRoutine] = useState<RoutineData>(createInitialRoutineData())
   const [activeTab, setActiveTab] = useState('evaluacion')
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
 
-  // Load saved data from localStorage
+  // Load from localStorage on mount
   useEffect(() => {
     const savedEval = localStorage.getItem(`goblet_eval_${clientId}`)
     const savedRoutine = localStorage.getItem(`goblet_routine_${clientId}`)
-    
+
     if (savedEval) {
       setEvaluation(JSON.parse(savedEval))
     } else {
-      // Set client name in evaluation
       setEvaluation(prev => ({
         ...prev,
-        patientData: {
-          ...prev.patientData,
-          nombreApellido: clientName
-        }
+        patientData: { ...prev.patientData, nombreApellido: clientName },
       }))
     }
-    
+
     if (savedRoutine) {
       setRoutine(JSON.parse(savedRoutine))
     } else {
-      // Set client name in routine header
       setRoutine(prev => ({
         ...prev,
-        header: {
-          ...prev.header,
-          nombreApellido: clientName
-        }
+        header: { ...prev.header, nombreApellido: clientName },
       }))
     }
   }, [clientId, clientName])
 
-  // Auto-save evaluation
+  // When session is ready, load from Drive (takes priority over localStorage)
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      localStorage.setItem(`goblet_eval_${clientId}`, JSON.stringify(evaluation))
-    }, 500)
-    return () => clearTimeout(timeout)
-  }, [evaluation, clientId])
+    if (!session?.accessToken) return
 
-  // Auto-save routine
+    Promise.all([
+      readFromDrive<EvaluationData>(session.accessToken, `goblet_eval_${clientId}.json`),
+      readFromDrive<RoutineData>(session.accessToken, `goblet_routine_${clientId}.json`),
+    ]).then(([driveEval, driveRoutine]) => {
+      if (driveEval) setEvaluation(driveEval)
+      if (driveRoutine) setRoutine(driveRoutine)
+    })
+  }, [session, clientId])
+
+  // Auto-save: localStorage always, Drive if authenticated
   useEffect(() => {
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
+      localStorage.setItem(`goblet_eval_${clientId}`, JSON.stringify(evaluation))
       localStorage.setItem(`goblet_routine_${clientId}`, JSON.stringify(routine))
+
+      if (!session?.accessToken) return
+
+      setSyncStatus('saving')
+      try {
+        await Promise.all([
+          writeToDrive(session.accessToken, `goblet_eval_${clientId}.json`, evaluation),
+          writeToDrive(session.accessToken, `goblet_routine_${clientId}.json`, routine),
+        ])
+        setSyncStatus('saved')
+        setTimeout(() => setSyncStatus('idle'), 2000)
+      } catch {
+        setSyncStatus('error')
+      }
     }, 500)
+
     return () => clearTimeout(timeout)
-  }, [routine, clientId])
+  }, [evaluation, routine, clientId, session])
 
   const handleDownloadEvaluation = async () => {
     const buffer = await exportEvaluationToExcel(evaluation)
@@ -115,12 +133,13 @@ export default function ClientPage({ params }: ClientPageProps) {
               </div>
             </div>
 
-            <Button
-              onClick={activeTab === 'evaluacion' ? handleDownloadEvaluation : handleDownloadRoutine}
-            >
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Descargar Excel
-            </Button>
+            <div className="flex items-center gap-3">
+              <AuthButton syncStatus={syncStatus} />
+              <Button onClick={activeTab === 'evaluacion' ? handleDownloadEvaluation : handleDownloadRoutine}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Descargar Excel
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -132,19 +151,13 @@ export default function ClientPage({ params }: ClientPageProps) {
             <TabsTrigger value="evaluacion">Evaluacion</TabsTrigger>
             <TabsTrigger value="rutina">Rutina</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="evaluacion">
-            <EvaluationBuilder 
-              data={evaluation} 
-              onChange={setEvaluation} 
-            />
+            <EvaluationBuilder data={evaluation} onChange={setEvaluation} />
           </TabsContent>
-          
+
           <TabsContent value="rutina">
-            <RoutineBuilder 
-              data={routine}
-              onChange={setRoutine}
-            />
+            <RoutineBuilder data={routine} onChange={setRoutine} />
           </TabsContent>
         </Tabs>
       </main>

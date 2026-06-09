@@ -1,12 +1,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
-import { Plus, Search, User, Folder } from 'lucide-react'
+import { Plus, Search, User } from 'lucide-react'
 import Link from 'next/link'
+import { AuthButton, SyncStatus } from '@/components/auth-button'
+import { readFromDrive, writeToDrive } from '@/lib/drive-sync'
 
 interface Client {
   id: string
@@ -14,44 +17,73 @@ interface Client {
   createdAt: string
 }
 
-// Demo clients for the mockup
 const DEMO_CLIENTS: Client[] = [
   { id: '1', name: 'Juan Pérez', createdAt: '2026-05-20' },
   { id: '2', name: 'María García', createdAt: '2026-05-18' },
   { id: '3', name: 'Carlos López', createdAt: '2026-05-15' },
 ]
 
+const CLIENTS_FILE = 'goblet_clients.json'
+const LOCAL_KEY = 'goblet_demo_clients'
+
 export default function ClientsDashboard() {
+  const { data: session } = useSession()
   const [clients, setClients] = useState<Client[]>([])
   const [search, setSearch] = useState('')
   const [newClientName, setNewClientName] = useState('')
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
 
-  // Load clients from localStorage or use demo data
+  // Load from localStorage on mount
   useEffect(() => {
-    const savedClients = localStorage.getItem('goblet_demo_clients')
-    if (savedClients) {
-      setClients(JSON.parse(savedClients))
+    const saved = localStorage.getItem(LOCAL_KEY)
+    if (saved) {
+      setClients(JSON.parse(saved))
     } else {
       setClients(DEMO_CLIENTS)
-      localStorage.setItem('goblet_demo_clients', JSON.stringify(DEMO_CLIENTS))
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(DEMO_CLIENTS))
     }
   }, [])
 
-  const handleCreateClient = () => {
+  // When session is ready, load from Drive (takes priority over localStorage)
+  useEffect(() => {
+    if (!session?.accessToken) return
+    readFromDrive<Client[]>(session.accessToken, CLIENTS_FILE).then(driveClients => {
+      if (driveClients) {
+        setClients(driveClients)
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(driveClients))
+      }
+    })
+  }, [session])
+
+  const saveClients = async (updated: Client[]) => {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(updated))
+    if (!session?.accessToken) return
+
+    setSyncStatus('saving')
+    try {
+      await writeToDrive(session.accessToken, CLIENTS_FILE, updated)
+      setSyncStatus('saved')
+      setTimeout(() => setSyncStatus('idle'), 2000)
+    } catch {
+      setSyncStatus('error')
+    }
+  }
+
+  const handleCreateClient = async () => {
     if (!newClientName.trim()) return
 
     const newClient: Client = {
       id: Date.now().toString(),
       name: newClientName.trim(),
-      createdAt: new Date().toISOString().split('T')[0]
+      createdAt: new Date().toISOString().split('T')[0],
     }
 
-    const updatedClients = [...clients, newClient]
-    setClients(updatedClients)
-    localStorage.setItem('goblet_demo_clients', JSON.stringify(updatedClients))
+    const updated = [...clients, newClient]
+    setClients(updated)
     setNewClientName('')
     setIsDialogOpen(false)
+    await saveClients(updated)
   }
 
   const filteredClients = clients.filter(client =>
@@ -73,10 +105,7 @@ export default function ClientsDashboard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 px-3 py-1.5 rounded-full">
-            <Folder className="h-4 w-4" />
-            <span>Modo Demo</span>
-          </div>
+          <AuthButton syncStatus={syncStatus} />
         </div>
       </header>
 
@@ -97,7 +126,7 @@ export default function ClientsDashboard() {
               className="pl-10"
             />
           </div>
-          
+
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button>

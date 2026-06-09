@@ -12,6 +12,65 @@ interface EvaluationBuilderProps {
   onChange: (data: EvaluationData) => void
 }
 
+interface GoniometryTableProps {
+  title: string
+  section: keyof EvaluationData['goniometry']
+  rows: GoniometryRow[]
+  onUpdate: (section: keyof EvaluationData['goniometry'], index: number, field: keyof GoniometryRow, value: string) => void
+}
+
+function GoniometryTable({ title, section, rows, onUpdate }: GoniometryTableProps) {
+  return (
+    <div className="mb-4">
+      <div className="bg-primary/10 border border-border px-3 py-1.5">
+        <span className="text-sm font-semibold text-primary">{title}</span>
+      </div>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="bg-muted/50">
+            <th className="border border-border px-2 py-1 text-left text-xs font-medium">Movimiento</th>
+            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-20">Activo</th>
+            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-20">Pasivo</th>
+            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-24">Valor Normal</th>
+            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-20">Dolor</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={row.movement}>
+              <td className="border border-border px-2 py-0.5 text-sm">{row.movement}</td>
+              <td className="border border-border p-0">
+                <Input
+                  value={row.active}
+                  onChange={(e) => onUpdate(section, index, 'active', e.target.value)}
+                  className="border-0 h-7 text-center text-sm rounded-none"
+                />
+              </td>
+              <td className="border border-border p-0">
+                <Input
+                  value={row.passive}
+                  onChange={(e) => onUpdate(section, index, 'passive', e.target.value)}
+                  className="border-0 h-7 text-center text-sm rounded-none"
+                />
+              </td>
+              <td className="border border-border px-2 py-0.5 text-center text-xs text-muted-foreground">
+                {row.normalValue}
+              </td>
+              <td className="border border-border p-0">
+                <Input
+                  value={row.pain}
+                  onChange={(e) => onUpdate(section, index, 'pain', e.target.value)}
+                  className="border-0 h-7 text-center text-sm rounded-none"
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
   const updatePatientData = (field: keyof typeof data.patientData, value: string) => {
     onChange({
@@ -123,56 +182,6 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
     const updated = data.evolucion.filter((_, i) => i !== index)
     onChange({ ...data, evolucion: updated })
   }
-
-  const GoniometryTable = ({ title, section, rows }: { title: string; section: keyof typeof data.goniometry; rows: GoniometryRow[] }) => (
-    <div className="mb-4">
-      <div className="bg-primary/10 border border-border px-3 py-1.5">
-        <span className="text-sm font-semibold text-primary">{title}</span>
-      </div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="bg-muted/50">
-            <th className="border border-border px-2 py-1 text-left text-xs font-medium">Movimiento</th>
-            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-20">Activo</th>
-            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-20">Pasivo</th>
-            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-24">Valor Normal</th>
-            <th className="border border-border px-2 py-1 text-center text-xs font-medium w-20">Dolor</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={row.movement}>
-              <td className="border border-border px-2 py-0.5 text-sm">{row.movement}</td>
-              <td className="border border-border p-0">
-                <Input
-                  value={row.active}
-                  onChange={(e) => updateGoniometry(section, index, 'active', e.target.value)}
-                  className="border-0 h-7 text-center text-sm rounded-none"
-                />
-              </td>
-              <td className="border border-border p-0">
-                <Input
-                  value={row.passive}
-                  onChange={(e) => updateGoniometry(section, index, 'passive', e.target.value)}
-                  className="border-0 h-7 text-center text-sm rounded-none"
-                />
-              </td>
-              <td className="border border-border px-2 py-0.5 text-center text-xs text-muted-foreground">
-                {row.normalValue}
-              </td>
-              <td className="border border-border p-0">
-                <Input
-                  value={row.pain}
-                  onChange={(e) => updateGoniometry(section, index, 'pain', e.target.value)}
-                  className="border-0 h-7 text-center text-sm rounded-none"
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -446,13 +455,13 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
               <h3 className="font-semibold text-sm">RANGOS DE MOVIMIENTO (GONIOMETRÍA)</h3>
             </div>
             <div className="p-4">
-              <GoniometryTable title="HOMBRO" section="hombro" rows={data.goniometry.hombro} />
-              <GoniometryTable title="CODO" section="codo" rows={data.goniometry.codo} />
-              <GoniometryTable title="MUÑECA" section="muneca" rows={data.goniometry.muneca} />
-              <GoniometryTable title="RODILLA" section="rodilla" rows={data.goniometry.rodilla} />
-              <GoniometryTable title="TOBILLO" section="tobillo" rows={data.goniometry.tobillo} />
-              <GoniometryTable title="COLUMNA CERVICAL" section="columnaCervical" rows={data.goniometry.columnaCervical} />
-              <GoniometryTable title="COLUMNA LUMBAR" section="columnaLumbar" rows={data.goniometry.columnaLumbar} />
+              <GoniometryTable title="HOMBRO" section="hombro" rows={data.goniometry.hombro} onUpdate={updateGoniometry} />
+              <GoniometryTable title="CODO" section="codo" rows={data.goniometry.codo} onUpdate={updateGoniometry} />
+              <GoniometryTable title="MUÑECA" section="muneca" rows={data.goniometry.muneca} onUpdate={updateGoniometry} />
+              <GoniometryTable title="RODILLA" section="rodilla" rows={data.goniometry.rodilla} onUpdate={updateGoniometry} />
+              <GoniometryTable title="TOBILLO" section="tobillo" rows={data.goniometry.tobillo} onUpdate={updateGoniometry} />
+              <GoniometryTable title="COLUMNA CERVICAL" section="columnaCervical" rows={data.goniometry.columnaCervical} onUpdate={updateGoniometry} />
+              <GoniometryTable title="COLUMNA LUMBAR" section="columnaLumbar" rows={data.goniometry.columnaLumbar} onUpdate={updateGoniometry} />
             </div>
           </div>
         </div>
