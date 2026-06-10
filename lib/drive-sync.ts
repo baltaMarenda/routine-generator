@@ -1,8 +1,10 @@
 const DRIVE_API = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3'
-const FOLDER_NAME = 'GOBLET'
+const ROOT_FOLDER = 'GOBLET'
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
-let _folderId: string | null = null
+// In-memory cache: folderId per cache key (avoids redundant Drive queries per session)
+const _folderCache: Record<string, string> = {}
 
 async function apiFetch(accessToken: string, url: string, options: RequestInit = {}) {
   const res = await fetch(url, {
@@ -13,80 +15,174 @@ async function apiFetch(accessToken: string, url: string, options: RequestInit =
   return res.json()
 }
 
-async function getFolderId(accessToken: string): Promise<string> {
-  if (_folderId) return _folderId
+/**
+ * Returns the id of a folder with `name` under `parentId` (or Drive root).
+ * If the folder doesn't exist yet it is created. Never creates duplicates.
+ */
+async function getOrCreateFolder(
+  accessToken: string,
+  name: string,
+  parentId?: string
+): Promise<string> {
+  const cacheKey = parentId ? `${parentId}/${name}` : name
+  if (_folderCache[cacheKey]) return _folderCache[cacheKey]
+
+  const parentClause = parentId
+    ? ` and '${parentId}' in parents`
+    : " and 'root' in parents"
 
   const q = encodeURIComponent(
-    `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+    `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentClause}`
   )
-  const { files } = await apiFetch(accessToken, `${DRIVE_API}/files?q=${q}&fields=files(id)`)
+  const { files } = await apiFetch(
+    accessToken,
+    `${DRIVE_API}/files?q=${q}&fields=files(id)`
+  )
 
   if (files.length > 0) {
-    _folderId = files[0].id
-    return _folderId!
+    _folderCache[cacheKey] = files[0].id
+    return files[0].id
   }
+
+  const body: Record<string, unknown> = {
+    name,
+    mimeType: 'application/vnd.google-apps.folder',
+  }
+  if (parentId) body.parents = [parentId]
 
   const folder = await apiFetch(accessToken, `${DRIVE_API}/files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+    body: JSON.stringify(body),
   })
-  _folderId = folder.id
-  return _folderId!
+  _folderCache[cacheKey] = folder.id
+  return folder.id
 }
 
-async function findFileId(accessToken: string, folderId: string, filename: string): Promise<string | null> {
-  const q = encodeURIComponent(`name='${filename}' and '${folderId}' in parents and trashed=false`)
-  const { files } = await apiFetch(accessToken, `${DRIVE_API}/files?q=${q}&fields=files(id)`)
+/** Returns the id of GOBLET/{clientName}/, creating both folders if needed. */
+async function getClientFolderId(
+  accessToken: string,
+  clientName: string
+): Promise<string> {
+  const rootId = await getOrCreateFolder(accessToken, ROOT_FOLDER)
+  return getOrCreateFolder(accessToken, clientName, rootId)
+}
+
+/** Returns the Drive file id of an existing file, or null. */
+async function findFileId(
+  accessToken: string,
+  folderId: string,
+  filename: string
+): Promise<string | null> {
+  const q = encodeURIComponent(
+    `name='${filename}' and '${folderId}' in parents and trashed=false`
+  )
+  const { files } = await apiFetch(
+    accessToken,
+    `${DRIVE_API}/files?q=${q}&fields=files(id)`
+  )
   return files.length > 0 ? files[0].id : null
 }
 
-export async function readFromDrive<T>(accessToken: string, filename: string): Promise<T | null> {
-  try {
-    const folderId = await getFolderId(accessToken)
-    const fileId = await findFileId(accessToken, folderId, filename)
-    if (!fileId) return null
+/** Uploads a single binary blob using multipart upload. Creates or replaces the file. */
+async function uploadBinaryFile(
+  accessToken: string,
+  folderId: string,
+  filename: string,
+  mimeType: string,
+  data: Uint8Array | Buffer,
+  existingId?: string | null
+): Promise<void> {
+  const boundary = 'goblet_bin_boundary'
+  const metadataJson = existingId ? '{}' : JSON.stringify({ name: filename, parents: [folderId] })
+  const preamble = new Blob([
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n`,
+    metadataJson,
+    `\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+  ])
+  const epilogue = new Blob([`\r\n--${boundary}--`])
+  const body = new Blob([preamble, data, epilogue])
 
-    const res = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-    if (!res.ok) return null
-    return res.json()
-  } catch {
-    return null
-  }
+  const url = existingId
+    ? `${UPLOAD_API}/files/${existingId}?uploadType=multipart`
+    : `${UPLOAD_API}/files?uploadType=multipart`
+
+  const res = await fetch(url, {
+    method: existingId ? 'PATCH' : 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  })
+  if (!res.ok) throw new Error(`Drive upload ${res.status}`)
 }
 
-export async function writeToDrive(accessToken: string, filename: string, data: unknown): Promise<void> {
-  const folderId = await getFolderId(accessToken)
-  const fileId = await findFileId(accessToken, folderId, filename)
+/**
+ * Uploads all photos to GOBLET/{clientName}/ as {clientName}_Foto_01.ext, _Foto_02.ext, ...
+ * Extra photos from a previous save (if count decreased) are deleted.
+ */
+export async function writeClientPhotosToDrive(
+  accessToken: string,
+  clientName: string,
+  photos: string[]
+): Promise<void> {
+  const folderId = await getClientFolderId(accessToken, clientName)
 
-  const boundary = 'goblet_boundary'
-  const metadata = JSON.stringify(fileId ? {} : { name: filename, parents: [folderId] })
-  const body = [
-    `--${boundary}`,
-    'Content-Type: application/json',
-    '',
-    metadata,
-    `--${boundary}`,
-    'Content-Type: application/json',
-    '',
-    JSON.stringify(data),
-    `--${boundary}--`,
-  ].join('\r\n')
-
-  const res = await fetch(
-    fileId
-      ? `${UPLOAD_API}/files/${fileId}?uploadType=multipart`
-      : `${UPLOAD_API}/files?uploadType=multipart`,
-    {
-      method: fileId ? 'PATCH' : 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    }
+  // List existing photo files for this client
+  const q = encodeURIComponent(
+    `'${folderId}' in parents and name contains '_Foto_' and trashed=false`
   )
-  if (!res.ok) throw new Error(`Drive write ${res.status}`)
+  const { files: existing } = await apiFetch(
+    accessToken,
+    `${DRIVE_API}/files?q=${q}&fields=files(id,name)`
+  ) as { files: { id: string; name: string }[] }
+
+  const uploadedNames = new Set<string>()
+
+  for (let i = 0; i < photos.length; i++) {
+    const dataUrl = photos[i]
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+    if (!match) continue
+
+    const mimeType = match[1]
+    const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg'
+    const filename = `${clientName}_Foto_${String(i + 1).padStart(2, '0')}.${ext}`
+    uploadedNames.add(filename)
+
+    const binaryStr = atob(match[2])
+    const bytes = new Uint8Array(binaryStr.length)
+    for (let j = 0; j < binaryStr.length; j++) bytes[j] = binaryStr.charCodeAt(j)
+
+    const existingFile = existing.find(f => f.name === filename)
+    await uploadBinaryFile(accessToken, folderId, filename, mimeType, bytes, existingFile?.id)
+  }
+
+  // Delete Drive photos that no longer exist in the current array
+  await Promise.all(
+    existing
+      .filter(f => !uploadedNames.has(f.name))
+      .map(f =>
+        fetch(`${DRIVE_API}/files/${f.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+      )
+  )
+}
+
+/**
+ * Uploads an xlsx buffer to GOBLET/{clientName}/{clientName}_{type}.xlsx.
+ * If the file already exists it is replaced (PATCH); otherwise created (POST).
+ */
+export async function writeClientXlsxToDrive(
+  accessToken: string,
+  clientName: string,
+  type: 'Evaluacion' | 'Rutina',
+  buffer: Buffer
+): Promise<void> {
+  const folderId = await getClientFolderId(accessToken, clientName)
+  const filename = `${clientName}_${type}.xlsx`
+  const existingId = await findFileId(accessToken, folderId, filename)
+  await uploadBinaryFile(accessToken, folderId, filename, XLSX_MIME, buffer, existingId)
 }

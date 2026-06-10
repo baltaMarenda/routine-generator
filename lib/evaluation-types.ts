@@ -82,12 +82,20 @@ export interface EvaluationData {
   // Palpation
   palpacion: {
     hipertonia: boolean
+    hipertoniaObs: string
     triggerPoints: boolean
+    triggerPointsObs: string
     restriccionFascial: boolean
+    restriccionFascialObs: string
     dolorPalpacion: boolean
+    dolorPalpacionObs: string
     edema: boolean
+    edemaObs: string
     observaciones: string
   }
+
+  // Photographic Record
+  registroFotografico: string[]
 
   // Special Tests
   pruebasEspeciales: string
@@ -224,12 +232,18 @@ export function createEmptyEvaluation(): EvaluationData {
     },
     palpacion: {
       hipertonia: false,
+      hipertoniaObs: '',
       triggerPoints: false,
+      triggerPointsObs: '',
       restriccionFascial: false,
+      restriccionFascialObs: '',
       dolorPalpacion: false,
+      dolorPalpacionObs: '',
       edema: false,
+      edemaObs: '',
       observaciones: ''
     },
+    registroFotografico: [],
     pruebasEspeciales: '',
     diagnosticoKinesiologico: '',
     objetivos: {

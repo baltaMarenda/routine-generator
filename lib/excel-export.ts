@@ -22,6 +22,12 @@ const subLogoFont: Partial<ExcelJS.Font> = { size: 9, name: 'Arial', color: { ar
 function addDaySheet(workbook: ExcelJS.Workbook, day: DayRoutine, clientName: string) {
   const worksheet = workbook.addWorksheet(day.name)
 
+  worksheet.pageSetup.orientation = 'landscape'
+  worksheet.pageSetup.fitToPage = true
+  worksheet.pageSetup.fitToWidth = 1
+  worksheet.pageSetup.fitToHeight = 0
+  worksheet.pageSetup.paperSize = 9 // A4
+
   worksheet.columns = [
     { width: 35 },
     { width: 12 },
