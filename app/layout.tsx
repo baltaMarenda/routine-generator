@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
 import { SessionProvider } from '@/components/session-provider'
 import './globals.css'
 
@@ -10,7 +9,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'Goblet - Creador de Rutinas',
   description: 'Crea y exporta rutinas de entrenamiento profesionales',
-  generator: 'v0.app',
   icons: {
     icon: [
       {
@@ -41,7 +39,6 @@ export default function RootLayout({
         <SessionProvider>
           {children}
         </SessionProvider>
-        <Analytics />
       </body>
     </html>
   )
