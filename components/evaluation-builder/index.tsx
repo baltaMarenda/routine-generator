@@ -1,10 +1,11 @@
 'use client'
 
+import { useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Camera, X } from 'lucide-react'
 import { EvaluationData, GoniometryRow } from '@/lib/evaluation-types'
 
 interface EvaluationBuilderProps {
@@ -72,6 +73,7 @@ function GoniometryTable({ title, section, rows, onUpdate }: GoniometryTableProp
 }
 
 export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
+  const photoInputRef = useRef<HTMLInputElement>(null)
   const updatePatientData = (field: keyof typeof data.patientData, value: string) => {
     onChange({
       ...data,
@@ -149,6 +151,15 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
       ...data,
       palpacion: { ...data.palpacion, [field]: value }
     })
+  }
+
+  const addPhoto = (dataUrl: string) => {
+    onChange({ ...data, registroFotografico: [...(data.registroFotografico ?? []), dataUrl] })
+  }
+
+  const removePhoto = (index: number) => {
+    const updated = (data.registroFotografico ?? []).filter((_, i) => i !== index)
+    onChange({ ...data, registroFotografico: updated })
   }
 
   const updateObjetivos = (field: keyof typeof data.objetivos, value: string) => {
@@ -462,6 +473,73 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
               <GoniometryTable title="TOBILLO" section="tobillo" rows={data.goniometry.tobillo} onUpdate={updateGoniometry} />
               <GoniometryTable title="COLUMNA CERVICAL" section="columnaCervical" rows={data.goniometry.columnaCervical} onUpdate={updateGoniometry} />
               <GoniometryTable title="COLUMNA LUMBAR" section="columnaLumbar" rows={data.goniometry.columnaLumbar} onUpdate={updateGoniometry} />
+
+              {/* Photographic Record */}
+              <div className="mt-4">
+                <div className="bg-primary/10 border border-border px-3 py-1.5 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-primary">REGISTRO FOTOGRÁFICO</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => photoInputRef.current?.click()}
+                    className="h-7 px-2 text-xs"
+                  >
+                    <Camera className="h-3 w-3 mr-1" />
+                    Agregar foto
+                  </Button>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      Array.from(e.target.files ?? []).forEach(file => {
+                        const reader = new FileReader()
+                        reader.onload = (ev) => {
+                          if (ev.target?.result) addPhoto(ev.target.result as string)
+                        }
+                        reader.readAsDataURL(file)
+                      })
+                      e.target.value = ''
+                    }}
+                  />
+                </div>
+                {(data.registroFotografico ?? []).length === 0 ? (
+                  <div
+                    className="border border-dashed border-border p-6 text-center text-sm text-muted-foreground cursor-pointer hover:border-primary transition-colors"
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    <Camera className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                    Hacé clic para agregar fotos
+                  </div>
+                ) : (
+                  <div className="border border-border p-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {(data.registroFotografico ?? []).map((src, i) => (
+                      <div key={i} className="relative group">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt={`Foto ${i + 1}`}
+                          className="w-full h-32 object-cover rounded border border-border"
+                        />
+                        <button
+                          onClick={() => removePhoto(i)}
+                          className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <div
+                      className="h-32 border-2 border-dashed border-border rounded flex items-center justify-center cursor-pointer hover:border-primary transition-colors"
+                      onClick={() => photoInputRef.current?.click()}
+                    >
+                      <Plus className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -472,32 +550,49 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
         <div className="bg-muted px-4 py-2 border-b border-border">
           <h3 className="font-semibold text-sm">PALPACIÓN</h3>
         </div>
-        <div className="p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-4">
-            {[
-              { key: 'hipertonia', label: 'Hipertonía' },
-              { key: 'triggerPoints', label: 'Trigger points' },
-              { key: 'restriccionFascial', label: 'Restricción fascial' },
-              { key: 'dolorPalpacion', label: 'Dolor a la palpación' },
-              { key: 'edema', label: 'Edema' },
-            ].map(({ key, label }) => (
-              <div key={key} className="flex items-center gap-2">
-                <Checkbox
-                  checked={data.palpacion[key as keyof typeof data.palpacion] as boolean}
-                  onCheckedChange={(checked) => updatePalpacion(key, checked as boolean)}
-                />
-                <span className="text-sm">{label}</span>
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm">Observaciones:</span>
-            <Input
-              value={data.palpacion.observaciones}
-              onChange={(e) => updatePalpacion('observaciones', e.target.value)}
-              className="flex-1"
-            />
-          </div>
+        <div className="p-0">
+          <table className="w-full border-collapse">
+            <tbody>
+              {[
+                { check: 'hipertonia', obs: 'hipertoniaObs', label: 'Hipertonía' },
+                { check: 'triggerPoints', obs: 'triggerPointsObs', label: 'Trigger points' },
+                { check: 'restriccionFascial', obs: 'restriccionFascialObs', label: 'Restricción fascial' },
+                { check: 'dolorPalpacion', obs: 'dolorPalpacionObs', label: 'Dolor a la palpación' },
+                { check: 'edema', obs: 'edemaObs', label: 'Edema' },
+              ].map(({ check, obs, label }) => (
+                <tr key={check}>
+                  <td className="border border-border px-3 py-1.5 w-52">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        className="border-primary"
+                        checked={(data.palpacion[check as keyof typeof data.palpacion] as boolean) ?? false}
+                        onCheckedChange={(checked) => updatePalpacion(check, checked as boolean)}
+                      />
+                      <span className="text-sm">{label}</span>
+                    </div>
+                  </td>
+                  <td className="border border-border p-0">
+                    <Input
+                      value={(data.palpacion[obs as keyof typeof data.palpacion] as string) ?? ''}
+                      onChange={(e) => updatePalpacion(obs, e.target.value)}
+                      className="border-0 h-8 rounded-none"
+                      placeholder="Observaciones"
+                    />
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td className="border border-border px-3 py-0.5 text-sm font-medium">Observaciones generales:</td>
+                <td className="border border-border p-0">
+                  <Input
+                    value={data.palpacion.observaciones}
+                    onChange={(e) => updatePalpacion('observaciones', e.target.value)}
+                    className="border-0 h-8 rounded-none"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -565,45 +660,56 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
         <div className="bg-muted px-4 py-2 border-b border-border">
           <h3 className="font-semibold text-sm">PLAN DE TRATAMIENTO</h3>
         </div>
-        <div className="p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-4">
-            {[
-              { key: 'terapiaManual', label: 'Terapia manual' },
-              { key: 'ejercicioTerapeutico', label: 'Ejercicio terapéutico' },
-              { key: 'liberacionMiofascial', label: 'Liberación miofascial' },
-              { key: 'electroterapia', label: 'Electroterapia' },
-              { key: 'ultrasonido', label: 'Ultrasonido' },
-              { key: 'puncionSeca', label: 'Punción seca' },
-              { key: 'vendajeFuncional', label: 'Vendaje funcional / kinesiotape' },
-              { key: 'reeducacionPostural', label: 'Reeducación postural' },
-            ].map(({ key, label }) => (
-              <div key={key} className="flex items-center gap-2">
-                <Checkbox
-                  checked={data.planTratamiento[key as keyof typeof data.planTratamiento] as boolean}
-                  onCheckedChange={(checked) => updatePlanTratamiento(key, checked as boolean)}
-                />
-                <span className="text-sm">{label}</span>
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm whitespace-nowrap">Frecuencia semanal:</span>
-              <Input
-                value={data.planTratamiento.frecuenciaSemanal}
-                onChange={(e) => updatePlanTratamiento('frecuenciaSemanal', e.target.value)}
-                className="flex-1"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm whitespace-nowrap">Duración estimada:</span>
-              <Input
-                value={data.planTratamiento.duracionEstimada}
-                onChange={(e) => updatePlanTratamiento('duracionEstimada', e.target.value)}
-                className="flex-1"
-              />
-            </div>
-          </div>
+        <div className="p-0">
+          <table className="w-full border-collapse">
+            <tbody>
+              {[
+                { key: 'terapiaManual', label: 'Terapia manual' },
+                { key: 'ejercicioTerapeutico', label: 'Ejercicio terapéutico' },
+                { key: 'liberacionMiofascial', label: 'Liberación miofascial' },
+                { key: 'electroterapia', label: 'Electroterapia' },
+                { key: 'ultrasonido', label: 'Ultrasonido' },
+                { key: 'puncionSeca', label: 'Punción seca' },
+                { key: 'vendajeFuncional', label: 'Vendaje funcional / kinesiotape' },
+                { key: 'reeducacionPostural', label: 'Reeducación postural' },
+              ].map(({ key, label }) => (
+                <tr key={key}>
+                  <td className="border border-border px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        className="border-primary"
+                        checked={data.planTratamiento[key as keyof typeof data.planTratamiento] as boolean}
+                        onCheckedChange={(checked) => updatePlanTratamiento(key, checked as boolean)}
+                      />
+                      <span className="text-sm">{label}</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td className="border border-border px-3 py-2">
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm whitespace-nowrap font-medium">Frecuencia semanal:</span>
+                      <Input
+                        value={data.planTratamiento.frecuenciaSemanal}
+                        onChange={(e) => updatePlanTratamiento('frecuenciaSemanal', e.target.value)}
+                        className="w-32"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm whitespace-nowrap font-medium">Duración estimada:</span>
+                      <Input
+                        value={data.planTratamiento.duracionEstimada}
+                        onChange={(e) => updatePlanTratamiento('duracionEstimada', e.target.value)}
+                        className="w-32"
+                      />
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 

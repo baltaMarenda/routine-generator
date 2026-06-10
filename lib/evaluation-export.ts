@@ -12,9 +12,24 @@ const thinBorder: Partial<ExcelJS.Borders> = {
   right: { style: 'thin', color: { argb: BORDER_COLOR } }
 }
 
+/** Inserts a manual page break so that `rowNumber` always starts on a new page. */
+function addPageBreakBefore(ws: ExcelJS.Worksheet, rowNumber: number) {
+  if (rowNumber <= 1) return
+  const breaks = (ws as unknown as { rowBreaks: Array<{ id: number; max: number; man: boolean }> }).rowBreaks
+  if (Array.isArray(breaks)) {
+    breaks.push({ id: rowNumber - 1, max: 16383, man: true })
+  }
+}
+
 export async function exportEvaluationToExcel(data: EvaluationData): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
   const ws = workbook.addWorksheet('Evaluación')
+
+  ws.pageSetup.orientation = 'landscape'
+  ws.pageSetup.fitToPage = true
+  ws.pageSetup.fitToWidth = 1
+  ws.pageSetup.fitToHeight = 0
+  ws.pageSetup.paperSize = 9 // A4
 
   // Set column widths
   ws.columns = [
@@ -164,6 +179,7 @@ export async function exportEvaluationToExcel(data: EvaluationData): Promise<Buf
   goniRow = writeGoniometryTable('CODO', data.goniometry.codo, goniRow)
   goniRow = writeGoniometryTable('MUÑECA', data.goniometry.muneca, goniRow)
   goniRow = writeGoniometryTable('RODILLA', data.goniometry.rodilla, goniRow)
+  addPageBreakBefore(ws, goniRow)
   goniRow = writeGoniometryTable('TOBILLO', data.goniometry.tobillo, goniRow)
   goniRow = writeGoniometryTable('COLUMNA CERVICAL', data.goniometry.columnaCervical, goniRow)
   writeGoniometryTable('COLUMNA LUMBAR', data.goniometry.columnaLumbar, goniRow)
@@ -197,6 +213,7 @@ export async function exportEvaluationToExcel(data: EvaluationData): Promise<Buf
   row++
 
   // Clinical Evaluation - EVA
+  addPageBreakBefore(ws, row)
   ws.mergeCells(`A${row}:D${row}`)
   const clinHeader = ws.getCell(`A${row}`)
   clinHeader.value = 'EVALUACIÓN CLÍNICA'
@@ -293,19 +310,22 @@ export async function exportEvaluationToExcel(data: EvaluationData): Promise<Buf
   row++
 
   const palpChecks = [
-    ['hipertonia', 'Hipertonía'],
-    ['triggerPoints', 'Trigger points'],
-    ['restriccionFascial', 'Restricción fascial'],
-    ['dolorPalpacion', 'Dolor a la palpación'],
-    ['edema', 'Edema'],
+    ['hipertonia', 'Hipertonía', 'hipertoniaObs'],
+    ['triggerPoints', 'Trigger points', 'triggerPointsObs'],
+    ['restriccionFascial', 'Restricción fascial', 'restriccionFascialObs'],
+    ['dolorPalpacion', 'Dolor a la palpación', 'dolorPalpacionObs'],
+    ['edema', 'Edema', 'edemaObs'],
   ] as const
 
-  for (const [key, label] of palpChecks) {
+  for (const [key, label, obsKey] of palpChecks) {
     ws.getCell(`A${row}`).value = `${data.palpacion[key] ? '☑' : '☐'} ${label}`
     ws.getCell(`A${row}`).border = thinBorder
+    ws.mergeCells(`B${row}:D${row}`)
+    ws.getCell(`B${row}`).value = (data.palpacion as Record<string, unknown>)[obsKey] as string ?? ''
+    ws.getCell(`B${row}`).border = thinBorder
     row++
   }
-  ws.getCell(`A${row}`).value = 'Observaciones:'
+  ws.getCell(`A${row}`).value = 'Observaciones generales:'
   ws.getCell(`A${row}`).border = thinBorder
   ws.mergeCells(`B${row}:D${row}`)
   ws.getCell(`B${row}`).value = data.palpacion.observaciones
@@ -341,6 +361,7 @@ export async function exportEvaluationToExcel(data: EvaluationData): Promise<Buf
   row += 3
 
   // Objetivos
+  addPageBreakBefore(ws, row)
   ws.mergeCells(`A${row}:D${row}`)
   const objHeader = ws.getCell(`A${row}`)
   objHeader.value = 'OBJETIVOS TERAPÉUTICOS'
@@ -442,6 +463,46 @@ export async function exportEvaluationToExcel(data: EvaluationData): Promise<Buf
   ws.getCell(`A${row}`).value = `Firma y sello del profesional: ${data.consentimiento.firmaProfesional}`
   row++
   ws.getCell(`A${row}`).value = `Fecha: ${data.consentimiento.fecha}`
+  row += 2
+
+  // Registro Fotográfico
+  const photos = data.registroFotografico ?? []
+  if (photos.length > 0) {
+    ws.mergeCells(`A${row}:D${row}`)
+    const photoHeader = ws.getCell(`A${row}`)
+    photoHeader.value = 'REGISTRO FOTOGRÁFICO'
+    photoHeader.font = { bold: true }
+    photoHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LIGHT_GRAY } }
+    photoHeader.border = thinBorder
+    row++
+
+    const IMG_W = 160  // px
+    const IMG_H = 120  // px
+    // Excel row height is in points; 1pt ≈ 1px * 0.75
+    const ROW_HEIGHT_PT = IMG_H * 0.75
+
+    // Two photos per row, columns A-B and C-D
+    for (let i = 0; i < photos.length; i += 2) {
+      ws.getRow(row).height = ROW_HEIGHT_PT
+
+      const addPhoto = (dataUrl: string, colOffset: number) => {
+        const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+        if (!match) return
+        const mime = match[1]
+        const ext = mime.includes('png') ? 'png' : 'jpeg'
+        const imgId = workbook.addImage({ base64: match[2], extension: ext as 'jpeg' | 'png' })
+        ws.addImage(imgId, {
+          tl: { col: colOffset, row: row - 1 },
+          ext: { width: IMG_W, height: IMG_H },
+        })
+      }
+
+      addPhoto(photos[i], 0)
+      if (i + 1 < photos.length) addPhoto(photos[i + 1], 2)
+
+      row++
+    }
+  }
 
   const buffer = await workbook.xlsx.writeBuffer()
   return Buffer.from(buffer)

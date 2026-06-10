@@ -8,8 +8,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
 import { Plus, Search, User } from 'lucide-react'
 import Link from 'next/link'
-import { AuthButton, SyncStatus } from '@/components/auth-button'
-import { readFromDrive, writeToDrive } from '@/lib/drive-sync'
+import { AuthButton } from '@/components/auth-button'
 
 interface Client {
   id: string
@@ -23,7 +22,6 @@ const DEMO_CLIENTS: Client[] = [
   { id: '3', name: 'Carlos López', createdAt: '2026-05-15' },
 ]
 
-const CLIENTS_FILE = 'goblet_clients.json'
 const LOCAL_KEY = 'goblet_demo_clients'
 
 export default function ClientsDashboard() {
@@ -32,9 +30,7 @@ export default function ClientsDashboard() {
   const [search, setSearch] = useState('')
   const [newClientName, setNewClientName] = useState('')
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
 
-  // Load from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_KEY)
     if (saved) {
@@ -45,32 +41,7 @@ export default function ClientsDashboard() {
     }
   }, [])
 
-  // When session is ready, load from Drive (takes priority over localStorage)
-  useEffect(() => {
-    if (!session?.accessToken) return
-    readFromDrive<Client[]>(session.accessToken, CLIENTS_FILE).then(driveClients => {
-      if (driveClients) {
-        setClients(driveClients)
-        localStorage.setItem(LOCAL_KEY, JSON.stringify(driveClients))
-      }
-    })
-  }, [session])
-
-  const saveClients = async (updated: Client[]) => {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(updated))
-    if (!session?.accessToken) return
-
-    setSyncStatus('saving')
-    try {
-      await writeToDrive(session.accessToken, CLIENTS_FILE, updated)
-      setSyncStatus('saved')
-      setTimeout(() => setSyncStatus('idle'), 2000)
-    } catch {
-      setSyncStatus('error')
-    }
-  }
-
-  const handleCreateClient = async () => {
+  const handleCreateClient = () => {
     if (!newClientName.trim()) return
 
     const newClient: Client = {
@@ -81,9 +52,9 @@ export default function ClientsDashboard() {
 
     const updated = [...clients, newClient]
     setClients(updated)
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(updated))
     setNewClientName('')
     setIsDialogOpen(false)
-    await saveClients(updated)
   }
 
   const filteredClients = clients.filter(client =>
@@ -105,7 +76,7 @@ export default function ClientsDashboard() {
             </div>
           </div>
 
-          <AuthButton syncStatus={syncStatus} />
+          <AuthButton />
         </div>
       </header>
 

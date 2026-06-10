@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, FileSpreadsheet } from 'lucide-react'
+import { ArrowLeft, FileSpreadsheet, CloudUpload } from 'lucide-react'
 import Link from 'next/link'
 import { EvaluationBuilder } from '@/components/evaluation-builder'
 import { RoutineBuilder } from '@/components/routine-builder'
@@ -14,7 +14,7 @@ import { RoutineData, createInitialRoutineData } from '@/lib/types'
 import { exportEvaluationToExcel } from '@/lib/evaluation-export'
 import { exportRoutineToExcel } from '@/lib/excel-export'
 import { AuthButton, SyncStatus } from '@/components/auth-button'
-import { readFromDrive, writeToDrive } from '@/lib/drive-sync'
+import { writeClientXlsxToDrive, writeClientPhotosToDrive } from '@/lib/drive-sync'
 
 interface ClientPageProps {
   params: Promise<{ id: string }>
@@ -56,42 +56,41 @@ export default function ClientPage({ params }: ClientPageProps) {
     }
   }, [clientId, clientName])
 
-  // When session is ready, load from Drive (takes priority over localStorage)
+  // Auto-save to localStorage only
   useEffect(() => {
-    if (!session?.accessToken) return
-
-    Promise.all([
-      readFromDrive<EvaluationData>(session.accessToken, `goblet_eval_${clientId}.json`),
-      readFromDrive<RoutineData>(session.accessToken, `goblet_routine_${clientId}.json`),
-    ]).then(([driveEval, driveRoutine]) => {
-      if (driveEval) setEvaluation(driveEval)
-      if (driveRoutine) setRoutine(driveRoutine)
-    })
-  }, [session, clientId])
-
-  // Auto-save: localStorage always, Drive if authenticated
-  useEffect(() => {
-    const timeout = setTimeout(async () => {
+    const timeout = setTimeout(() => {
       localStorage.setItem(`goblet_eval_${clientId}`, JSON.stringify(evaluation))
-      localStorage.setItem(`goblet_routine_${clientId}`, JSON.stringify(routine))
-
-      if (!session?.accessToken) return
-
-      setSyncStatus('saving')
-      try {
-        await Promise.all([
-          writeToDrive(session.accessToken, `goblet_eval_${clientId}.json`, evaluation),
-          writeToDrive(session.accessToken, `goblet_routine_${clientId}.json`, routine),
-        ])
-        setSyncStatus('saved')
-        setTimeout(() => setSyncStatus('idle'), 2000)
-      } catch {
-        setSyncStatus('error')
-      }
     }, 500)
-
     return () => clearTimeout(timeout)
-  }, [evaluation, routine, clientId, session])
+  }, [evaluation, clientId])
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      localStorage.setItem(`goblet_routine_${clientId}`, JSON.stringify(routine))
+    }, 500)
+    return () => clearTimeout(timeout)
+  }, [routine, clientId])
+
+  const handleSaveToDrive = async () => {
+    if (!session?.accessToken) return
+    setSyncStatus('saving')
+    try {
+      if (activeTab === 'evaluacion') {
+        const buffer = await exportEvaluationToExcel(evaluation)
+        await writeClientXlsxToDrive(session.accessToken, clientName, 'Evaluacion', buffer)
+        if ((evaluation.registroFotografico ?? []).length > 0) {
+          await writeClientPhotosToDrive(session.accessToken, clientName, evaluation.registroFotografico ?? [])
+        }
+      } else {
+        const buffer = await exportRoutineToExcel(routine)
+        await writeClientXlsxToDrive(session.accessToken, clientName, 'Rutina', buffer)
+      }
+      setSyncStatus('saved')
+      setTimeout(() => setSyncStatus('idle'), 2500)
+    } catch {
+      setSyncStatus('error')
+    }
+  }
 
   const handleDownloadEvaluation = async () => {
     const buffer = await exportEvaluationToExcel(evaluation)
@@ -154,10 +153,34 @@ export default function ClientPage({ params }: ClientPageProps) {
 
           <TabsContent value="evaluacion">
             <EvaluationBuilder data={evaluation} onChange={setEvaluation} />
+            {session && (
+              <div className="mt-8 flex justify-end">
+                <Button
+                  onClick={handleSaveToDrive}
+                  disabled={syncStatus === 'saving'}
+                  size="lg"
+                >
+                  <CloudUpload className="h-4 w-4 mr-2" />
+                  {syncStatus === 'saving' ? 'Guardando...' : 'Guardar Evaluación en Drive'}
+                </Button>
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="rutina">
             <RoutineBuilder data={routine} onChange={setRoutine} />
+            {session && (
+              <div className="mt-8 flex justify-end">
+                <Button
+                  onClick={handleSaveToDrive}
+                  disabled={syncStatus === 'saving'}
+                  size="lg"
+                >
+                  <CloudUpload className="h-4 w-4 mr-2" />
+                  {syncStatus === 'saving' ? 'Guardando...' : 'Guardar Rutina en Drive'}
+                </Button>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </main>
