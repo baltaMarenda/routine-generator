@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, FileSpreadsheet, CloudUpload } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ArrowLeft, FileSpreadsheet, CloudUpload, Copy, User } from 'lucide-react'
 import Link from 'next/link'
 import { EvaluationBuilder } from '@/components/evaluation-builder'
 import { RoutineBuilder } from '@/components/routine-builder'
@@ -15,6 +16,12 @@ import { exportEvaluationToExcel } from '@/lib/evaluation-export'
 import { exportRoutineToExcel } from '@/lib/excel-export'
 import { AuthButton, SyncStatus } from '@/components/auth-button'
 import { writeClientXlsxToDrive, writeClientPhotosToDrive } from '@/lib/drive-sync'
+
+interface Client {
+  id: string
+  name: string
+  createdAt: string
+}
 
 interface ClientPageProps {
   params: Promise<{ id: string }>
@@ -31,6 +38,8 @@ export default function ClientPage({ params }: ClientPageProps) {
   const [routine, setRoutine] = useState<RoutineData>(createInitialRoutineData())
   const [activeTab, setActiveTab] = useState('evaluacion')
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false)
+  const [otherClients, setOtherClients] = useState<Client[]>([])
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -70,6 +79,21 @@ export default function ClientPage({ params }: ClientPageProps) {
     }, 500)
     return () => clearTimeout(timeout)
   }, [routine, clientId])
+
+  const handleOpenCopyDialog = () => {
+    const saved = localStorage.getItem('goblet_demo_clients')
+    const all: Client[] = saved ? JSON.parse(saved) : []
+    setOtherClients(all.filter(c => c.id !== clientId))
+    setCopyDialogOpen(true)
+  }
+
+  const handleCopyRoutineFrom = (sourceClient: Client) => {
+    const saved = localStorage.getItem(`goblet_routine_${sourceClient.id}`)
+    if (!saved) return
+    const sourceRoutine: RoutineData = JSON.parse(saved)
+    setRoutine({ ...sourceRoutine, clientName })
+    setCopyDialogOpen(false)
+  }
 
   const handleSaveToDrive = async () => {
     if (!session?.accessToken) return
@@ -168,6 +192,12 @@ export default function ClientPage({ params }: ClientPageProps) {
           </TabsContent>
 
           <TabsContent value="rutina">
+            <div className="flex justify-end mb-4">
+              <Button variant="outline" size="sm" onClick={handleOpenCopyDialog}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copiar rutina de otro cliente
+              </Button>
+            </div>
             <RoutineBuilder data={routine} onChange={setRoutine} />
             {session && (
               <div className="mt-8 flex justify-end">
@@ -184,6 +214,44 @@ export default function ClientPage({ params }: ClientPageProps) {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Copy routine dialog */}
+      <Dialog open={copyDialogOpen} onOpenChange={setCopyDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Copiar rutina de otro cliente</DialogTitle>
+          </DialogHeader>
+          {otherClients.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No hay otros clientes con rutinas guardadas.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto py-2">
+              {otherClients.map(client => {
+                const hasRoutine = !!localStorage.getItem(`goblet_routine_${client.id}`)
+                return (
+                  <button
+                    key={client.id}
+                    onClick={() => handleCopyRoutineFrom(client)}
+                    disabled={!hasRoutine}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:border-primary hover:bg-primary/5 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center shrink-0">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">{client.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {hasRoutine ? 'Rutina disponible' : 'Sin rutina guardada'}
+                      </p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
