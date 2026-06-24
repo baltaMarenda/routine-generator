@@ -4,8 +4,9 @@ import { useState, useEffect, use } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { ArrowLeft, FileSpreadsheet, CloudUpload, Copy, User } from 'lucide-react'
 import Link from 'next/link'
 import { EvaluationBuilder } from '@/components/evaluation-builder'
@@ -15,7 +16,7 @@ import { RoutineData, createInitialRoutineData } from '@/lib/types'
 import { exportEvaluationToExcel } from '@/lib/evaluation-export'
 import { exportRoutineToExcel } from '@/lib/excel-export'
 import { AuthButton, SyncStatus } from '@/components/auth-button'
-import { writeClientXlsxToDrive, writeClientPhotosToDrive } from '@/lib/drive-sync'
+import { writeEvaluationXlsxToDrive, writeRoutineXlsxToDrive, writeClientPhotosToDrive } from '@/lib/drive-sync'
 
 interface Client {
   id: string
@@ -40,11 +41,23 @@ export default function ClientPage({ params }: ClientPageProps) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle')
   const [copyDialogOpen, setCopyDialogOpen] = useState(false)
   const [otherClients, setOtherClients] = useState<Client[]>([])
+  const [trainerDialogOpen, setTrainerDialogOpen] = useState(false)
+  const [profesor, setProfesor] = useState('')
+  const [dia, setDia] = useState('')
+  const [horario, setHorario] = useState('')
 
   // Load from localStorage on mount
   useEffect(() => {
     const savedEval = localStorage.getItem(`goblet_eval_${clientId}`)
     const savedRoutine = localStorage.getItem(`goblet_routine_${clientId}`)
+    const savedMeta = localStorage.getItem(`goblet_routine_meta_${clientId}`)
+
+    if (savedMeta) {
+      const meta = JSON.parse(savedMeta)
+      setProfesor(meta.profesor || '')
+      setDia(meta.dia || '')
+      setHorario(meta.horario || '')
+    }
 
     if (savedEval) {
       setEvaluation(JSON.parse(savedEval))
@@ -58,10 +71,7 @@ export default function ClientPage({ params }: ClientPageProps) {
     if (savedRoutine) {
       setRoutine(JSON.parse(savedRoutine))
     } else {
-      setRoutine(prev => ({
-        ...prev,
-        header: { ...prev.header, nombreApellido: clientName },
-      }))
+      setRoutine(prev => ({ ...prev, clientName }))
     }
   }, [clientId, clientName])
 
@@ -95,20 +105,30 @@ export default function ClientPage({ params }: ClientPageProps) {
     setCopyDialogOpen(false)
   }
 
-  const handleSaveToDrive = async () => {
+  const handleSaveEvaluationToDrive = async () => {
     if (!session?.accessToken) return
     setSyncStatus('saving')
     try {
-      if (activeTab === 'evaluacion') {
-        const buffer = await exportEvaluationToExcel(evaluation)
-        await writeClientXlsxToDrive(session.accessToken, clientName, 'Evaluacion', buffer)
-        if ((evaluation.registroFotografico ?? []).length > 0) {
-          await writeClientPhotosToDrive(session.accessToken, clientName, evaluation.registroFotografico ?? [])
-        }
-      } else {
-        const buffer = await exportRoutineToExcel(routine)
-        await writeClientXlsxToDrive(session.accessToken, clientName, 'Rutina', buffer)
+      const buffer = await exportEvaluationToExcel(evaluation)
+      await writeEvaluationXlsxToDrive(session.accessToken, clientName, buffer)
+      if ((evaluation.registroFotografico ?? []).length > 0) {
+        await writeClientPhotosToDrive(session.accessToken, clientName, evaluation.registroFotografico ?? [])
       }
+      setSyncStatus('saved')
+      setTimeout(() => setSyncStatus('idle'), 2500)
+    } catch {
+      setSyncStatus('error')
+    }
+  }
+
+  const handleConfirmSaveRoutine = async () => {
+    if (!session?.accessToken || !profesor.trim() || !dia.trim() || !horario.trim()) return
+    localStorage.setItem(`goblet_routine_meta_${clientId}`, JSON.stringify({ profesor, dia, horario }))
+    setTrainerDialogOpen(false)
+    setSyncStatus('saving')
+    try {
+      const buffer = await exportRoutineToExcel(routine)
+      await writeRoutineXlsxToDrive(session.accessToken, profesor.trim(), dia.trim(), horario.trim(), clientName, buffer)
       setSyncStatus('saved')
       setTimeout(() => setSyncStatus('idle'), 2500)
     } catch {
@@ -180,7 +200,7 @@ export default function ClientPage({ params }: ClientPageProps) {
             {session && (
               <div className="mt-8 flex justify-end">
                 <Button
-                  onClick={handleSaveToDrive}
+                  onClick={handleSaveEvaluationToDrive}
                   disabled={syncStatus === 'saving'}
                   size="lg"
                 >
@@ -202,7 +222,7 @@ export default function ClientPage({ params }: ClientPageProps) {
             {session && (
               <div className="mt-8 flex justify-end">
                 <Button
-                  onClick={handleSaveToDrive}
+                  onClick={() => setTrainerDialogOpen(true)}
                   disabled={syncStatus === 'saving'}
                   size="lg"
                 >
@@ -250,6 +270,50 @@ export default function ClientPage({ params }: ClientPageProps) {
               })}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Trainer/schedule dialog, asked before saving the routine to Drive */}
+      <Dialog open={trainerDialogOpen} onOpenChange={setTrainerDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Datos de entrenamiento</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Profesor</label>
+              <Input
+                value={profesor}
+                onChange={(e) => setProfesor(e.target.value)}
+                placeholder="Nombre del profesor"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Día</label>
+              <Input
+                value={dia}
+                onChange={(e) => setDia(e.target.value)}
+                placeholder="Ej: Lunes"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Horario</label>
+              <Input
+                value={horario}
+                onChange={(e) => setHorario(e.target.value)}
+                placeholder="Ej: 18:00"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTrainerDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleConfirmSaveRoutine} disabled={!profesor.trim() || !dia.trim() || !horario.trim()}>
+              Guardar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

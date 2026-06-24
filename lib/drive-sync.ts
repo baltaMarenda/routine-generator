@@ -68,6 +68,21 @@ async function getClientFolderId(
   return getOrCreateFolder(accessToken, clientName, rootId)
 }
 
+/** Returns the id of GOBLET/{profesor}/{dia}/{horario}/{clientName}/, creating any missing folders. */
+async function getRoutineFolderId(
+  accessToken: string,
+  profesor: string,
+  dia: string,
+  horario: string,
+  clientName: string
+): Promise<string> {
+  const rootId = await getOrCreateFolder(accessToken, ROOT_FOLDER)
+  const profesorId = await getOrCreateFolder(accessToken, profesor, rootId)
+  const diaId = await getOrCreateFolder(accessToken, dia, profesorId)
+  const horarioId = await getOrCreateFolder(accessToken, horario, diaId)
+  return getOrCreateFolder(accessToken, clientName, horarioId)
+}
+
 /** Returns the Drive file id of an existing file, or null. */
 async function findFileId(
   accessToken: string,
@@ -172,17 +187,34 @@ export async function writeClientPhotosToDrive(
 }
 
 /**
- * Uploads an xlsx buffer to GOBLET/{clientName}/{clientName}_{type}.xlsx.
+ * Uploads an xlsx buffer to GOBLET/{clientName}/{clientName}_Evaluacion.xlsx.
  * If the file already exists it is replaced (PATCH); otherwise created (POST).
  */
-export async function writeClientXlsxToDrive(
+export async function writeEvaluationXlsxToDrive(
   accessToken: string,
   clientName: string,
-  type: 'Evaluacion' | 'Rutina',
   buffer: Buffer
 ): Promise<void> {
   const folderId = await getClientFolderId(accessToken, clientName)
-  const filename = `${clientName}_${type}.xlsx`
+  const filename = `${clientName}_Evaluacion.xlsx`
+  const existingId = await findFileId(accessToken, folderId, filename)
+  await uploadBinaryFile(accessToken, folderId, filename, XLSX_MIME, buffer, existingId)
+}
+
+/**
+ * Uploads an xlsx buffer to GOBLET/{profesor}/{dia}/{horario}/{clientName}/{clientName}_Rutina.xlsx.
+ * If the file already exists it is replaced (PATCH); otherwise created (POST).
+ */
+export async function writeRoutineXlsxToDrive(
+  accessToken: string,
+  profesor: string,
+  dia: string,
+  horario: string,
+  clientName: string,
+  buffer: Buffer
+): Promise<void> {
+  const folderId = await getRoutineFolderId(accessToken, profesor, dia, horario, clientName)
+  const filename = `${clientName}_Rutina.xlsx`
   const existingId = await findFileId(accessToken, folderId, filename)
   await uploadBinaryFile(accessToken, folderId, filename, XLSX_MIME, buffer, existingId)
 }
