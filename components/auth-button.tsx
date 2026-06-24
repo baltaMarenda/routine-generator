@@ -17,12 +17,17 @@ export function AuthButton({ syncStatus = 'idle' }: AuthButtonProps) {
     return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
   }
 
-  if (!session) {
+  if (!session?.accessToken) {
     return (
-      <Button variant="outline" size="sm" onClick={() => signIn('google')}>
-        <Cloud className="h-4 w-4 mr-2" />
-        Conectar Drive
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => signIn('google')}>
+          <Cloud className="h-4 w-4 mr-2" />
+          Conectar Drive
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: '/login' })}>
+          Salir
+        </Button>
+      </div>
     )
   }
 
@@ -57,7 +62,7 @@ export function AuthButton({ syncStatus = 'idle' }: AuthButtonProps) {
           className="w-8 h-8 rounded-full"
         />
       )}
-      <Button variant="ghost" size="sm" onClick={() => signOut()}>
+      <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: '/login' })}>
         Salir
       </Button>
     </div>
