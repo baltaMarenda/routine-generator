@@ -20,10 +20,12 @@ export function ExerciseAutocomplete({
   const [isOpen, setIsOpen] = useState(false)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const [isFocused, setIsFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
 
   useEffect(() => {
+    if (!isFocused) return
     if (value.length > 0) {
       const filtered = exercises.filter(ex =>
         ex.toLowerCase().includes(value.toLowerCase())
@@ -35,7 +37,7 @@ export function ExerciseAutocomplete({
       setSuggestions([])
       setIsOpen(false)
     }
-  }, [value, exercises])
+  }, [value, exercises, isFocused])
 
   const handleSelect = (exercise: string) => {
     onChange(exercise)
@@ -77,8 +79,11 @@ export function ExerciseAutocomplete({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        onFocus={() => value.length > 0 && suggestions.length > 0 && setIsOpen(true)}
-        onBlur={() => setTimeout(() => setIsOpen(false), 150)}
+        onFocus={() => {
+          setIsFocused(true)
+          if (value.length > 0 && suggestions.length > 0) setIsOpen(true)
+        }}
+        onBlur={() => setTimeout(() => { setIsFocused(false); setIsOpen(false) }, 150)}
         placeholder={placeholder}
         className={className}
       />

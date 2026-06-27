@@ -116,7 +116,8 @@ export default function ClientPage({ params }: ClientPageProps) {
       }
       setSyncStatus('saved')
       setTimeout(() => setSyncStatus('idle'), 2500)
-    } catch {
+    } catch (err) {
+      console.error('Error al guardar evaluación en Drive:', err)
       setSyncStatus('error')
     }
   }
@@ -131,7 +132,8 @@ export default function ClientPage({ params }: ClientPageProps) {
       await writeRoutineXlsxToDrive(session.accessToken, profesor.trim(), dia.trim(), horario.trim(), clientName, buffer)
       setSyncStatus('saved')
       setTimeout(() => setSyncStatus('idle'), 2500)
-    } catch {
+    } catch (err) {
+      console.error('Error al guardar rutina en Drive:', err)
       setSyncStatus('error')
     }
   }

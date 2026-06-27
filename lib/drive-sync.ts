@@ -3,15 +3,32 @@ const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3'
 const ROOT_FOLDER = 'GOBLET'
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
-// In-memory cache: folderId per cache key (avoids redundant Drive queries per session)
-const _folderCache: Record<string, string> = {}
+const FOLDER_CACHE_LS_KEY = 'goblet_drive_folder_cache'
+
+function readFolderCache(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(FOLDER_CACHE_LS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeFolderCache(cache: Record<string, string>): void {
+  try {
+    localStorage.setItem(FOLDER_CACHE_LS_KEY, JSON.stringify(cache))
+  } catch {}
+}
 
 async function apiFetch(accessToken: string, url: string, options: RequestInit = {}) {
   const res = await fetch(url, {
     ...options,
     headers: { Authorization: `Bearer ${accessToken}`, ...options.headers },
   })
-  if (!res.ok) throw new Error(`Drive API ${res.status}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Drive API ${res.status}: ${body}`)
+  }
   return res.json()
 }
 
@@ -25,7 +42,8 @@ async function getOrCreateFolder(
   parentId?: string
 ): Promise<string> {
   const cacheKey = parentId ? `${parentId}/${name}` : name
-  if (_folderCache[cacheKey]) return _folderCache[cacheKey]
+  const cache = readFolderCache()
+  if (cache[cacheKey]) return cache[cacheKey]
 
   const parentClause = parentId
     ? ` and '${parentId}' in parents`
@@ -36,11 +54,12 @@ async function getOrCreateFolder(
   )
   const { files } = await apiFetch(
     accessToken,
-    `${DRIVE_API}/files?q=${q}&fields=files(id)`
+    `${DRIVE_API}/files?q=${q}&fields=files(id)&spaces=drive`
   )
 
   if (files.length > 0) {
-    _folderCache[cacheKey] = files[0].id
+    cache[cacheKey] = files[0].id
+    writeFolderCache(cache)
     return files[0].id
   }
 
@@ -55,7 +74,8 @@ async function getOrCreateFolder(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  _folderCache[cacheKey] = folder.id
+  cache[cacheKey] = folder.id
+  writeFolderCache(cache)
   return folder.id
 }
 
@@ -130,7 +150,10 @@ async function uploadBinaryFile(
     },
     body,
   })
-  if (!res.ok) throw new Error(`Drive upload ${res.status}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Drive upload ${res.status}: ${body}`)
+  }
 }
 
 /**
