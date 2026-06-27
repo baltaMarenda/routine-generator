@@ -37,8 +37,11 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
   }, [])
 
   useEffect(() => {
-    if (data.days && data.days.length > 0 && !activeDay) {
-      setActiveDay(data.days[0].id)
+    if (data.days && data.days.length > 0) {
+      const dayExists = data.days.some(d => d.id === activeDay)
+      if (!activeDay || !dayExists) {
+        setActiveDay(data.days[0].id)
+      }
     }
   }, [data.days, activeDay])
 
