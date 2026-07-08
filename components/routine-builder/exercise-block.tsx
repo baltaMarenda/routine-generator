@@ -6,6 +6,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { Block, Exercise } from '@/lib/types'
 import { createEmptyExercise } from '@/lib/types'
 import { ExerciseAutocomplete } from './exercise-autocomplete'
+import { SetsRepsAutocomplete } from './sets-reps-autocomplete'
 
 interface ExerciseBlockProps {
   block: Block
@@ -126,10 +127,10 @@ export function ExerciseBlock({ block, onUpdate, onDelete, canDelete, exercises 
             {exercise.weeks.map((week, weekIndex) => (
               <td key={weekIndex} className="border border-border p-0" colSpan={2}>
                 <div className="flex">
-                  <Input 
+                  <SetsRepsAutocomplete
                     value={week.setsReps}
-                    onChange={(e) => updateWeek(exercise.id, weekIndex, 'setsReps', e.target.value)}
-                    className="border-0 bg-transparent h-9 text-center text-sm rounded-none border-r border-border focus-visible:ring-0 focus-visible:ring-offset-0 w-1/2"
+                    onChange={(value) => updateWeek(exercise.id, weekIndex, 'setsReps', value)}
+                    className="border-0 bg-transparent h-9 text-center text-sm rounded-none border-r border-border focus-visible:ring-0 focus-visible:ring-offset-0 w-full outline-none"
                     placeholder="3x12"
                   />
                   <Input 
