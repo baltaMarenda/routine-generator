@@ -13,6 +13,16 @@ const thinBorder: Partial<ExcelJS.Borders> = {
   right: { style: 'thin', color: { argb: blackColor } }
 }
 
+// Estimate how many lines a text needs when wrapped inside a cell/merged range
+// of the given total column width (in Excel width units ~= characters).
+function estimateWrappedLines(text: string, totalWidth: number): number {
+  if (!text) return 1
+  const charsPerLine = Math.max(1, Math.floor(totalWidth * 0.9))
+  return Math.max(1, Math.ceil(text.length / charsPerLine))
+}
+
+const rowLineHeight = 15
+
 const boldFont: Partial<ExcelJS.Font> = { bold: true, size: 10, name: 'Arial' }
 const normalFont: Partial<ExcelJS.Font> = { size: 10, name: 'Arial' }
 const whiteFont: Partial<ExcelJS.Font> = { bold: true, size: 10, name: 'Arial', color: { argb: whiteColor } }
@@ -77,19 +87,34 @@ function addDaySheet(workbook: ExcelJS.Workbook, day: DayRoutine, clientName: st
   condHeader.getCell(1).font = { ...boldFont, color: { argb: orangeColor } }
 
   const conditioningItems = day.conditioning.filter(c => c.trim() !== '')
+  // Left item spans columns 1-5, right item spans columns 6-12. Total widths
+  // of each span are used to estimate wrapping so long items flow onto the
+  // line below instead of being cut off.
+  const leftSpanWidth = 35 + 12 + 8 + 12 + 8
+  const rightSpanWidth = 12 + 8 + 12 + 8 + 12 + 8 + 18
   for (let i = 0; i < conditioningItems.length; i += 2) {
     const item1 = conditioningItems[i] ? `${String.fromCharCode(97 + i)}) ${conditioningItems[i]}` : ''
     const item2 = conditioningItems[i + 1] ? `${String.fromCharCode(97 + i + 1)}) ${conditioningItems[i + 1]}` : ''
-    
-    const condRow = worksheet.addRow([item1, '', '', '', item2])
-    condRow.getCell(1).font = normalFont
-    condRow.getCell(1).border = thinBorder
-    condRow.getCell(2).border = thinBorder
-    condRow.getCell(3).border = thinBorder
-    condRow.getCell(5).font = normalFont
-    condRow.getCell(5).border = thinBorder
-    condRow.getCell(6).border = thinBorder
-    condRow.getCell(7).border = thinBorder
+
+    const condRow = worksheet.addRow([item1, '', '', '', '', item2])
+    const condRowNum = condRow.number
+    worksheet.mergeCells(condRowNum, 1, condRowNum, 5)
+    worksheet.mergeCells(condRowNum, 6, condRowNum, 12)
+
+    for (let col = 1; col <= 12; col++) {
+      const cell = condRow.getCell(col)
+      cell.font = normalFont
+      cell.border = thinBorder
+      cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }
+    }
+
+    // Merged cells are not auto-fit by Excel, so estimate the wrapped height
+    // and set it explicitly (based on whichever side needs the most lines).
+    const lines = Math.max(
+      estimateWrappedLines(item1, leftSpanWidth),
+      estimateWrappedLines(item2, rightSpanWidth)
+    )
+    condRow.height = lines * rowLineHeight
   }
 
   worksheet.addRow([])
@@ -153,8 +178,18 @@ function addDaySheet(workbook: ExcelJS.Workbook, day: DayRoutine, clientName: st
         cell.font = normalFont
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: whiteColor } }
         cell.border = thinBorder
-        cell.alignment = { horizontal: col === 1 || col === 12 ? 'left' : 'center', vertical: 'middle' }
+        const wrap = col === 1 || col === 12
+        cell.alignment = {
+          horizontal: wrap ? 'left' : 'center',
+          vertical: 'middle',
+          wrapText: wrap,
+        }
       }
+
+      // The exercise name (col 1, width 35) can't get wider without pushing the
+      // sheet past A4, so long names wrap onto the line below. These are plain
+      // (non-merged) cells, so the spreadsheet app auto-fits the row height to
+      // the wrapped text on open — no explicit height needed.
     })
 
     worksheet.addRow([])

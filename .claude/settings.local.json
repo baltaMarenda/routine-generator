@@ -11,7 +11,18 @@
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/login)",
       "Bash(curl -s http://localhost:3000/api/auth/providers)",
       "Bash(git add *)",
-      "Bash(git restore *)"
+      "Bash(git restore *)",
+      "Bash(brew install *)",
+      "Bash(pdftoppm -png -r 130 \"/Users/baltazarmarenda/Downloads/Melina Vallone_Rutina\\(1\\).pdf\" mel)",
+      "Bash(npx --yes tsx --version)",
+      "Bash(npx tsx *)",
+      "Bash([ -x \"$SOFFICE\" ])",
+      "Bash(/Applications/LibreOffice.app/Contents/MacOS/soffice --headless --convert-to pdf --outdir . Melina_Vallone_Rutina.xlsx)",
+      "Bash(pdftoppm -png -r 130 Melina_Vallone_Rutina.pdf mv)",
+      "Bash(pdftoppm -png -r 130 -f 1 -l 1 Melina_auto.pdf auto_p)",
+      "Bash(rm -f _tmp_melina.ts)",
+      "Bash(/Applications/LibreOffice.app/Contents/MacOS/soffice --headless --convert-to pdf --outdir . Melina_final.xlsx)",
+      "Bash(pdftoppm -png -r 130 Melina_final.pdf final)"
     ]
   }
 }
