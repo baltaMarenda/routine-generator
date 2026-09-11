@@ -12,7 +12,7 @@ import { Loader2 } from 'lucide-react'
 export function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get('callbackUrl') || '/clientes'
+  const callbackUrl = searchParams.get('callbackUrl') || '/alumnos'
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -37,6 +37,7 @@ export function LoginForm() {
       return
     }
 
+    // Si tiene que cambiar la contraseña, proxy.ts lo desvía a /cambiar-password.
     router.push(callbackUrl)
   }
 
@@ -62,6 +63,7 @@ export function LoginForm() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoFocus
+                autoCapitalize="none"
                 autoComplete="username"
               />
             </div>
@@ -85,6 +87,10 @@ export function LoginForm() {
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Ingresar'}
             </Button>
+
+            <p className="text-xs text-muted-foreground text-center">
+              ¿Olvidaste tu contraseña? Pedile al administrador que te la resetee.
+            </p>
           </form>
         </CardContent>
       </Card>

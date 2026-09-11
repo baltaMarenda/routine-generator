@@ -1,46 +1,43 @@
 import type { NextAuthOptions } from 'next-auth'
 import type { JWT } from 'next-auth/jwt'
-import GoogleProvider from 'next-auth/providers/google'
 import CredentialsProvider from 'next-auth/providers/credentials'
+import { eq } from 'drizzle-orm'
+import { getDb, schema } from './db'
+import { normalizarUsername, verificarPassword } from './usuarios'
 
 /**
- * Usa el refresh_token de Google para pedir un access_token nuevo cuando el
- * anterior venció. Google no siempre devuelve un refresh_token nuevo, así que
- * conservamos el que ya teníamos si no viene uno.
+ * Cada cuánto el JWT vuelve a leer al usuario de la BD. `es_admin`, `activo` y
+ * `debe_cambiar_password` se cambian desde afuera (el admin o la BD); sin esto la
+ * sesión los arrastraría viejos hasta el próximo login. Las APIs igual los leen
+ * de la BD en cada request (lib/auth-server.ts): esto es sólo para la UI y proxy.ts.
  */
-async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
-  try {
-    if (!token.refreshToken) throw new Error('No refresh token available')
+const REFRESCO_MS = 60_000
 
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: process.env.GOOGLE_CLIENT_ID!,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-        grant_type: 'refresh_token',
-        refresh_token: token.refreshToken,
-      }),
-    })
+async function completarDesdeBd(token: JWT): Promise<JWT> {
+  if (!token.id) return token
 
-    const refreshed = await res.json()
-    if (!res.ok) throw refreshed
+  const [usuario] = await getDb()
+    .select()
+    .from(schema.usuarios)
+    .where(eq(schema.usuarios.id, token.id))
+    .limit(1)
 
-    return {
-      ...token,
-      accessToken: refreshed.access_token,
-      // expires_in viene en segundos; lo pasamos a epoch en ms
-      expiresAt: Date.now() + refreshed.expires_in * 1000,
-      refreshToken: refreshed.refresh_token ?? token.refreshToken,
-      error: undefined,
-    }
-  } catch (err) {
-    console.error('Error al refrescar el access token de Google:', err)
-    return { ...token, error: 'RefreshAccessTokenError' }
+  // Borrado o desactivado: sin id, proxy.ts lo manda al login.
+  if (!usuario || !usuario.activo) return { ...token, id: undefined }
+
+  return {
+    ...token,
+    name: usuario.nombre,
+    username: usuario.username,
+    nombre: usuario.nombre,
+    esAdmin: usuario.esAdmin,
+    debeCambiarPassword: usuario.debeCambiarPassword,
+    refrescadoEn: Date.now(),
   }
 }
 
 export const authOptions: NextAuthOptions = {
+  session: { strategy: 'jwt' },
   providers: [
     CredentialsProvider({
       name: 'Credentials',
@@ -49,24 +46,20 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Contraseña', type: 'password' },
       },
       async authorize(credentials) {
-        if (
-          credentials?.username === process.env.APP_USERNAME &&
-          credentials?.password === process.env.APP_PASSWORD
-        ) {
-          return { id: 'goblet-user', name: credentials.username }
-        }
-        return null
-      },
-    }),
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope: 'openid email profile https://www.googleapis.com/auth/drive.file',
-          access_type: 'offline',
-          prompt: 'consent',
-        },
+        const username = normalizarUsername(credentials?.username ?? '')
+        const password = credentials?.password ?? ''
+        if (!username || !password) return null
+
+        const [usuario] = await getDb()
+          .select()
+          .from(schema.usuarios)
+          .where(eq(schema.usuarios.username, username))
+          .limit(1)
+
+        if (!usuario || !usuario.activo) return null
+        if (!(await verificarPassword(password, usuario.passwordHash))) return null
+
+        return { id: usuario.id, name: usuario.nombre }
       },
     }),
   ],
@@ -74,32 +67,30 @@ export const authOptions: NextAuthOptions = {
     signIn: '/login',
   },
   callbacks: {
-    async jwt({ token, account }) {
-      // Primer sign-in: guardamos los tokens y el momento de expiración.
-      if (account) {
-        token.accessToken = account.access_token
-        token.refreshToken = account.refresh_token
-        // account.expires_at viene en segundos (epoch); lo guardamos en ms.
-        token.expiresAt = account.expires_at
-          ? account.expires_at * 1000
-          : Date.now() + 3600 * 1000
-        return token
+    async jwt({ token, user, trigger }) {
+      // Login recién hecho.
+      if (user) return completarDesdeBd({ ...token, id: user.id })
+
+      const vencido = !token.refrescadoEn || Date.now() - token.refrescadoEn > REFRESCO_MS
+      if (trigger === 'update' || vencido) {
+        try {
+          return await completarDesdeBd(token)
+        } catch (err) {
+          // Si la BD no responde, seguimos con lo que ya teníamos en vez de cortar la sesión.
+          console.error('No se pudo refrescar la sesión desde la BD:', err)
+        }
       }
-
-      // Login por credenciales (sin Google): no hay token que refrescar.
-      if (!token.refreshToken) return token
-
-      // Token todavía vigente (con 60s de margen): lo devolvemos tal cual.
-      if (token.expiresAt && Date.now() < token.expiresAt - 60_000) {
-        return token
-      }
-
-      // Venció: lo renovamos con el refresh token.
-      return refreshGoogleAccessToken(token)
+      return token
     },
     async session({ session, token }) {
-      session.accessToken = token.accessToken as string
-      session.error = token.error as string | undefined
+      session.user = {
+        ...session.user,
+        id: token.id ?? '',
+        username: token.username ?? '',
+        nombre: token.nombre ?? '',
+        esAdmin: token.esAdmin ?? false,
+        debeCambiarPassword: token.debeCambiarPassword ?? false,
+      }
       return session
     },
   },

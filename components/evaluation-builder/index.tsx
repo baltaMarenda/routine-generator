@@ -5,12 +5,22 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2, Camera, X } from 'lucide-react'
+import { Plus, Trash2, Camera, X, Loader2 } from 'lucide-react'
+import type { FotoDto } from '@/lib/api-types'
 import { EvaluationData, GoniometryRow } from '@/lib/evaluation-types'
 
 interface EvaluationBuilderProps {
   data: EvaluationData
   onChange: (data: EvaluationData) => void
+  /**
+   * Las fotos no viajan en `data.registroFotografico`: se guardan de a una en su
+   * propia tabla, así que las maneja la página.
+   */
+  fotos: FotoDto[]
+  /** Cantidad de fotos que se están comprimiendo/subiendo. */
+  subiendoFotos?: number
+  onAddPhotos: (files: File[]) => void
+  onRemovePhoto: (fotoId: string) => void
 }
 
 interface GoniometryTableProps {
@@ -72,7 +82,14 @@ function GoniometryTable({ title, section, rows, onUpdate }: GoniometryTableProp
   )
 }
 
-export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
+export function EvaluationBuilder({
+  data,
+  onChange,
+  fotos,
+  subiendoFotos = 0,
+  onAddPhotos,
+  onRemovePhoto,
+}: EvaluationBuilderProps) {
   const photoInputRef = useRef<HTMLInputElement>(null)
   const updatePatientData = (field: keyof typeof data.patientData, value: string) => {
     onChange({
@@ -151,15 +168,6 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
       ...data,
       palpacion: { ...data.palpacion, [field]: value }
     })
-  }
-
-  const addPhoto = (dataUrl: string) => {
-    onChange({ ...data, registroFotografico: [...(data.registroFotografico ?? []), dataUrl] })
-  }
-
-  const removePhoto = (index: number) => {
-    const updated = (data.registroFotografico ?? []).filter((_, i) => i !== index)
-    onChange({ ...data, registroFotografico: updated })
   }
 
   const updateObjetivos = (field: keyof typeof data.objetivos, value: string) => {
@@ -494,18 +502,15 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
                     multiple
                     className="hidden"
                     onChange={(e) => {
-                      Array.from(e.target.files ?? []).forEach(file => {
-                        const reader = new FileReader()
-                        reader.onload = (ev) => {
-                          if (ev.target?.result) addPhoto(ev.target.result as string)
-                        }
-                        reader.readAsDataURL(file)
-                      })
+                      // Van todas juntas a la página, que las comprime y las suma de a
+                      // una. Antes cada FileReader armaba la lista a partir del mismo
+                      // `data` viejo, y cada foto pisaba a la anterior.
+                      onAddPhotos(Array.from(e.target.files ?? []))
                       e.target.value = ''
                     }}
                   />
                 </div>
-                {(data.registroFotografico ?? []).length === 0 ? (
+                {fotos.length === 0 && subiendoFotos === 0 ? (
                   <div
                     className="border border-dashed border-border p-6 text-center text-sm text-muted-foreground cursor-pointer hover:border-primary transition-colors"
                     onClick={() => photoInputRef.current?.click()}
@@ -515,16 +520,24 @@ export function EvaluationBuilder({ data, onChange }: EvaluationBuilderProps) {
                   </div>
                 ) : (
                   <div className="border border-border p-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {(data.registroFotografico ?? []).map((src, i) => (
-                      <div key={i} className="relative group">
+                    {Array.from({ length: subiendoFotos }, (_, i) => (
+                      <div
+                        key={`subiendo-${i}`}
+                        className="h-32 rounded border border-border flex items-center justify-center bg-muted/40"
+                      >
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ))}
+                    {fotos.map((foto, i) => (
+                      <div key={foto.id} className="relative group">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={src}
+                          src={foto.dataUrl}
                           alt={`Foto ${i + 1}`}
                           className="w-full h-32 object-cover rounded border border-border"
                         />
                         <button
-                          onClick={() => removePhoto(i)}
+                          onClick={() => onRemovePhoto(foto.id)}
                           className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <X className="h-3 w-3" />
