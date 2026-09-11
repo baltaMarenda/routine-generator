@@ -1,18 +1,26 @@
-import 'next-auth'
+import type { DefaultSession } from 'next-auth'
 import 'next-auth/jwt'
 
 declare module 'next-auth' {
   interface Session {
-    accessToken?: string
-    error?: string
+    user: DefaultSession['user'] & {
+      id: string
+      username: string
+      nombre: string
+      esAdmin: boolean
+      debeCambiarPassword: boolean
+    }
   }
 }
 
 declare module 'next-auth/jwt' {
   interface JWT {
-    accessToken?: string
-    refreshToken?: string
-    expiresAt?: number
-    error?: string
+    id?: string
+    username?: string
+    nombre?: string
+    esAdmin?: boolean
+    debeCambiarPassword?: boolean
+    /** Epoch en ms de la última vez que se leyó al usuario de la BD. */
+    refrescadoEn?: number
   }
 }

@@ -213,7 +213,7 @@ export async function exportToExcel(data: RoutineData) {
   const buffer = await exportRoutineToExcel(data)
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   
-  const clientName = data.clientName?.trim() || 'Cliente'
+  const clientName = data.clientName?.trim() || 'Alumno'
   const fileName = `Rutina_${clientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`
   
   const link = document.createElement('a')
