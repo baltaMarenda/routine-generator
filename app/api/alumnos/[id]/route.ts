@@ -42,6 +42,7 @@ export const GET = ruta<Ctx>(async (_req, { params }) => {
     alumno: {
       id: alumno.id,
       nombre: alumno.nombre,
+      profesor: alumno.profesor,
       dia: alumno.dia,
       horario: alumno.horario,
       createdAt: alumno.createdAt.toISOString(),
@@ -62,6 +63,7 @@ export const GET = ruta<Ctx>(async (_req, { params }) => {
 })
 
 const textoCorto = z.string().trim().max(50).nullable().optional()
+const textoMedio = z.string().trim().max(100).nullable().optional()
 
 export const PATCH = ruta<Ctx>(async (req, { params }) => {
   const usuario = await requireUser()
@@ -70,7 +72,12 @@ export const PATCH = ruta<Ctx>(async (req, { params }) => {
 
   const cambios = await leerBody(
     req,
-    z.object({ nombre: nombreSchema.optional(), dia: textoCorto, horario: textoCorto })
+    z.object({
+      nombre: nombreSchema.optional(),
+      profesor: textoMedio,
+      dia: textoCorto,
+      horario: textoCorto,
+    })
   )
   const set = Object.fromEntries(Object.entries(cambios).filter(([, v]) => v !== undefined))
   if (Object.keys(set).length === 0) throw new HttpError(400, 'No hay nada para actualizar.')

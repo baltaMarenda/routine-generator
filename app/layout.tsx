@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { SessionProvider } from '@/components/session-provider'
+import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -25,6 +26,7 @@ export default function RootLayout({
         <SessionProvider>
           {children}
         </SessionProvider>
+        <Toaster position="top-center" theme="light" richColors />
       </body>
     </html>
   )

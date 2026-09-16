@@ -29,6 +29,7 @@ import {
   Trash2,
   User,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { EvaluationBuilder } from '@/components/evaluation-builder'
 import { RoutineBuilder } from '@/components/routine-builder'
 import { AuthButton, type SyncStatus } from '@/components/auth-button'
@@ -77,8 +78,9 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
   const { id: alumnoId } = use(params)
   const router = useRouter()
   const { data: session } = useSession()
-  // Cada profesor exporta a su propio Drive, en su carpeta GOBLET/{su nombre}/...
-  const profesor = session?.user?.nombre ?? ''
+  // Cada profesor exporta a su propio Drive, en GOBLET/{profesor}/... La carpeta
+  // "profesor" se guarda en el alumno; si nunca se eligió, arranca con su nombre.
+  const nombreUsuario = session?.user?.nombre ?? ''
   const drive = useDrive()
 
   const [carga, setCarga] = useState<Carga>('cargando')
@@ -113,6 +115,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
 
   // Which save is waiting on the día/horario dialog, if any
   const [pendingSave, setPendingSave] = useState<'evaluacion' | 'rutina' | null>(null)
+  const [profesor, setProfesor] = useState('')
   const [dia, setDia] = useState('')
   const [horario, setHorario] = useState('')
 
@@ -154,6 +157,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
       setEvaluation(evaluacion)
       setRoutine(detalle.rutina.datos)
       setFotos(fotos)
+      setProfesor(detalle.alumno.profesor ?? '')
       setDia(detalle.alumno.dia ?? '')
       setHorario(detalle.alumno.horario ?? '')
 
@@ -327,12 +331,13 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
   // of the logged-in user's own Drive.
   const handleConfirmSave = async () => {
     if (!pendingSave || !alumno) return
+    const profesorLimpio = profesor.trim()
     const diaLimpio = dia.trim()
     const horarioLimpio = horario.trim()
-    if (!profesor || !diaLimpio || !horarioLimpio) return
+    if (!profesorLimpio || !diaLimpio || !horarioLimpio) return
 
     const target = pendingSave
-    const carpeta = [profesor, diaLimpio, horarioLimpio] as const
+    const carpeta = [profesorLimpio, diaLimpio, horarioLimpio] as const
     setPendingSave(null)
     setSyncStatus('saving')
     setDriveError('')
@@ -341,12 +346,14 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
 
       // Guardado explícito: la BD queda al día sin esperar al autoguardado.
       await guardarCambios()
-      if (diaLimpio !== (alumno.dia ?? '') || horarioLimpio !== (alumno.horario ?? '')) {
-        await api(`/api/alumnos/${alumnoId}`, {
-          method: 'PATCH',
-          json: { dia: diaLimpio, horario: horarioLimpio },
-        })
-        setAlumno(prev => prev && { ...prev, dia: diaLimpio, horario: horarioLimpio })
+      if (
+        profesorLimpio !== (alumno.profesor ?? '') ||
+        diaLimpio !== (alumno.dia ?? '') ||
+        horarioLimpio !== (alumno.horario ?? '')
+      ) {
+        const carpetaNueva = { profesor: profesorLimpio, dia: diaLimpio, horario: horarioLimpio }
+        await api(`/api/alumnos/${alumnoId}`, { method: 'PATCH', json: carpetaNueva })
+        setAlumno(prev => prev && { ...prev, ...carpetaNueva })
       }
 
       if (target === 'evaluacion') {
@@ -370,6 +377,10 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
       }
       setSyncStatus('saved')
       setTimeout(() => setSyncStatus('idle'), 2500)
+      toast.success(
+        target === 'evaluacion' ? 'Evaluación guardada exitosamente' : 'Rutina guardada exitosamente',
+        { description: 'Se guardó en la base de datos y el Excel quedó en tu Drive.' }
+      )
     } catch (err) {
       console.error(`Error al guardar ${target} en Drive:`, err)
       setSyncStatus('error')
@@ -401,10 +412,11 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
       return
     }
 
-    if (drive.estado === 'conectado' && profesor && alumno.dia && alumno.horario) {
+    const carpetaProfesor = alumno.profesor || nombreUsuario
+    if (drive.estado === 'conectado' && carpetaProfesor && alumno.dia && alumno.horario) {
       try {
         const accessToken = await drive.obtenerToken()
-        await deleteStudentFolderFromDrive(accessToken, profesor, alumno.dia, alumno.horario, alumno.nombre)
+        await deleteStudentFolderFromDrive(accessToken, carpetaProfesor, alumno.dia, alumno.horario, alumno.nombre)
       } catch (err) {
         console.error('No se pudo mandar a la papelera la carpeta de Drive:', err)
       }
@@ -422,8 +434,10 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
         await exportEvaluationToExcel({ ...evaluation, registroFotografico: fotosActuales }),
         `${nombre}_Evaluacion.xlsx`
       )
+      toast.success('Excel de la evaluación descargado exitosamente')
     } else {
       descargar(await exportRoutineToExcel(routine), `${nombre}_Rutina.xlsx`)
+      toast.success('Excel de la rutina descargado exitosamente')
     }
   }
 
@@ -449,6 +463,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
       <Button
         onClick={() => {
           setDriveError('')
+          setProfesor(prev => prev.trim() ? prev : nombreUsuario)
           setPendingSave(target)
         }}
         disabled={syncStatus === 'saving'}
@@ -768,14 +783,19 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
           <DialogHeader>
             <DialogTitle>Datos de entrenamiento</DialogTitle>
             <DialogDescription>
-              Se guarda en tu Drive, en GOBLET/{profesor || 'profesor'}/{dia.trim() || 'día'}/
+              Se guarda en tu Drive, en GOBLET/{profesor.trim() || 'profesor'}/{dia.trim() || 'día'}/
               {horario.trim() || 'horario'}/{nombreAlumno}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Profesor</label>
-              <Input value={profesor} disabled />
+              <Input
+                value={profesor}
+                onChange={(e) => setProfesor(e.target.value)}
+                placeholder="Ej: Juan"
+                maxLength={100}
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Día</label>
@@ -803,7 +823,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
             </Button>
             <Button
               onClick={() => void handleConfirmSave()}
-              disabled={!profesor || !dia.trim() || !horario.trim()}
+              disabled={!profesor.trim() || !dia.trim() || !horario.trim()}
             >
               Guardar
             </Button>
