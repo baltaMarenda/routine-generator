@@ -25,6 +25,7 @@ export interface AlumnoDetalle {
   alumno: {
     id: string
     nombre: string
+    profesor: string | null
     dia: string | null
     horario: string | null
     createdAt: string

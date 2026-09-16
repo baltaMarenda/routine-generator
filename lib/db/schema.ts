@@ -43,6 +43,8 @@ export const alumnos = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     nombre: text('nombre').notNull(),
     creadoPor: uuid('creado_por').notNull().references(() => usuarios.id),
+    /** Carpeta de profesor en Drive (GOBLET/{profesor}/...); la elige quien exporta. */
+    profesor: text('profesor'),
     dia: text('dia'),
     horario: text('horario'),
     /** Id que tenía el alumno en el alumnos.json de Drive; hace idempotente la importación. */
