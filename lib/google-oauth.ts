@@ -57,9 +57,17 @@ export function descifrar(valor: string): string {
   }
 }
 
+/**
+ * Origen público de la app. Detrás del proxy del hosting, `req.url` trae la
+ * dirección interna del servidor (p. ej. https://localhost:10000), así que manda
+ * NEXTAUTH_URL.
+ */
+export function origenPublico(origenRequest: string): string {
+  return process.env.NEXTAUTH_URL ?? origenRequest
+}
+
 export function redirectUri(origenRequest: string): string {
-  const base = process.env.NEXTAUTH_URL ?? origenRequest
-  return new URL('/api/google/callback', base).toString()
+  return new URL('/api/google/callback', origenPublico(origenRequest)).toString()
 }
 
 export function urlConsentimiento(state: string, redirect: string): string {

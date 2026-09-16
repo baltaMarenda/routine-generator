@@ -8,6 +8,7 @@ import {
   cifrar,
   COOKIE_STATE,
   COOKIE_VOLVER,
+  origenPublico,
   redirectUri,
   rutaInterna,
 } from '@/lib/google-oauth'
@@ -20,7 +21,7 @@ export const GET = ruta(async req => {
   const volver = rutaInterna(store.get(COOKIE_VOLVER)?.value)
 
   const terminar = (resultado: 'conectado' | 'cancelado' | 'error') => {
-    const destino = new URL(volver, url.origin)
+    const destino = new URL(volver, origenPublico(url.origin))
     destino.searchParams.set('drive', resultado)
     const res = NextResponse.redirect(destino)
     res.cookies.delete({ name: COOKIE_STATE, path: '/api/google' })
