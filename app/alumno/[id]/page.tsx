@@ -27,6 +27,7 @@ import {
   Loader2,
   Share2,
   Trash2,
+  TriangleAlert,
   User,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -38,6 +39,8 @@ import { api, ApiError } from '@/lib/api-client'
 import type { AccesosRutina, AlumnoDetalle, FotoDto, RutinaCopiable } from '@/lib/api-types'
 import {
   deleteStudentFolderFromDrive,
+  getStudentFolderId,
+  listFileNames,
   writeEvaluationXlsxToDrive,
   writeRoutineXlsxToDrive,
   writeStudentPhotosToDrive,
@@ -64,6 +67,28 @@ const evaluacionSinFotos = (evaluacion: EvaluationData): EvaluationData => ({
   ...evaluacion,
   registroFotografico: [],
 })
+
+/** Lo que tipea el profesor, sin espacios de más ni ".xlsx" (se agrega solo). */
+const limpiarNombreArchivo = (nombre: string) => nombre.trim().replace(/\.xlsx$/i, '').trim()
+
+/** Drive deja nombres repetidos; comparamos sin mayúsculas para no confundir al profesor. */
+const nombreOcupado = (existentes: string[], base: string) =>
+  existentes.some(n => n.toLowerCase() === `${base}.xlsx`.toLowerCase())
+
+/** Primer "{alumno}_Rutina_N" libre, para proponer cuando el nombre de siempre ya existe. */
+function proponerNombreRutina(existentes: string[], alumno: string): string {
+  for (let n = 2; ; n++) {
+    const base = `${alumno}_Rutina_${n}`
+    if (!nombreOcupado(existentes, base)) return base
+  }
+}
+
+/** Una rutina que no se subió porque en la carpeta ya hay un archivo con ese nombre. */
+interface ConflictoRutina {
+  folderId: string
+  existente: string
+  nombre: string
+}
 
 function descargar(buffer: Buffer, filename: string) {
   const url = URL.createObjectURL(new Blob([buffer], { type: XLSX_MIME }))
@@ -118,6 +143,11 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
   const [profesor, setProfesor] = useState('')
   const [dia, setDia] = useState('')
   const [horario, setHorario] = useState('')
+
+  // La rutina nunca pisa un Excel que ya está en el Drive: se pide otro nombre.
+  const [conflicto, setConflicto] = useState<ConflictoRutina | null>(null)
+  const [conflictoError, setConflictoError] = useState('')
+  const [guardandoConflicto, setGuardandoConflicto] = useState(false)
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -327,6 +357,28 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
     }
   }
 
+  /** Sube la rutina como archivo nuevo y registra en la BD el id + webViewLink de Drive. */
+  const subirRutina = async (accessToken: string, folderId: string, filename: string) => {
+    const buffer = await exportRoutineToExcel(routine)
+    const archivo = await writeRoutineXlsxToDrive(accessToken, folderId, filename, buffer)
+    if (rutinaId && archivo.webViewLink) {
+      const { guardado } = await api<{ guardado: boolean }>(`/api/rutinas/${rutinaId}/drive`, {
+        method: 'POST',
+        json: { fileId: archivo.id, webViewLink: archivo.webViewLink },
+      })
+      if (guardado) setMiDriveLink(archivo.webViewLink)
+    }
+  }
+
+  const avisarGuardado = (target: 'evaluacion' | 'rutina', detalle?: string) => {
+    setSyncStatus('saved')
+    setTimeout(() => setSyncStatus('idle'), 2500)
+    toast.success(
+      target === 'evaluacion' ? 'Evaluación guardada exitosamente' : 'Rutina guardada exitosamente',
+      { description: detalle ?? 'Se guardó en la base de datos y el Excel quedó en tu Drive.' }
+    )
+  }
+
   // Evaluation and routine both land in GOBLET/{profesor}/{dia}/{horario}/{alumno}/
   // of the logged-in user's own Drive.
   const handleConfirmSave = async () => {
@@ -364,29 +416,60 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
           await writeStudentPhotosToDrive(accessToken, ...carpeta, alumno.nombre, dataUrls)
         }
       } else {
-        const buffer = await exportRoutineToExcel(routine)
-        const archivo = await writeRoutineXlsxToDrive(accessToken, ...carpeta, alumno.nombre, buffer)
-        // Registra en la BD el archivo que devolvió Drive (id + webViewLink).
-        if (rutinaId && archivo.webViewLink) {
-          const { guardado } = await api<{ guardado: boolean }>(`/api/rutinas/${rutinaId}/drive`, {
-            method: 'POST',
-            json: { fileId: archivo.id, webViewLink: archivo.webViewLink },
+        const folderId = await getStudentFolderId(accessToken, ...carpeta, alumno.nombre)
+        const existentes = await listFileNames(accessToken, folderId)
+        const base = `${alumno.nombre}_Rutina`
+        if (nombreOcupado(existentes, base)) {
+          // La BD ya quedó guardada; el Excel espera a que elijan otro nombre.
+          setSyncStatus('idle')
+          setConflictoError('')
+          setConflicto({
+            folderId,
+            existente: `${base}.xlsx`,
+            nombre: proponerNombreRutina(existentes, alumno.nombre),
           })
-          if (guardado) setMiDriveLink(archivo.webViewLink)
+          return
         }
+        await subirRutina(accessToken, folderId, `${base}.xlsx`)
       }
-      setSyncStatus('saved')
-      setTimeout(() => setSyncStatus('idle'), 2500)
-      toast.success(
-        target === 'evaluacion' ? 'Evaluación guardada exitosamente' : 'Rutina guardada exitosamente',
-        { description: 'Se guardó en la base de datos y el Excel quedó en tu Drive.' }
-      )
+      avisarGuardado(target)
     } catch (err) {
       console.error(`Error al guardar ${target} en Drive:`, err)
       setSyncStatus('error')
       setDriveError(
         mensajeDeError(err, 'No se pudo guardar en Drive. Revisá la conexión e intentá de nuevo.')
       )
+    }
+  }
+
+  /** Guarda la rutina con el nombre que eligió el profesor en el cartel de conflicto. */
+  const handleGuardarConOtroNombre = async () => {
+    if (!conflicto) return
+    const base = limpiarNombreArchivo(conflicto.nombre)
+    if (!base) return
+
+    setGuardandoConflicto(true)
+    setConflictoError('')
+    try {
+      const accessToken = await drive.obtenerToken()
+      // Se vuelve a listar: puede haber cambiado desde que se abrió el cartel.
+      const existentes = await listFileNames(accessToken, conflicto.folderId)
+      if (nombreOcupado(existentes, base)) {
+        setConflictoError(`También existe "${base}.xlsx" en esa carpeta. Elegí otro nombre.`)
+        return
+      }
+      setSyncStatus('saving')
+      await subirRutina(accessToken, conflicto.folderId, `${base}.xlsx`)
+      setConflicto(null)
+      avisarGuardado('rutina', `Se guardó como ${base}.xlsx; la rutina anterior sigue en tu Drive.`)
+    } catch (err) {
+      console.error('Error al guardar la rutina en Drive:', err)
+      setSyncStatus('error')
+      setConflictoError(
+        mensajeDeError(err, 'No se pudo guardar en Drive. Revisá la conexión e intentá de nuevo.')
+      )
+    } finally {
+      setGuardandoConflicto(false)
     }
   }
 
@@ -770,6 +853,75 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
                 <>
                   <Trash2 className="h-4 w-4 mr-2" />
                   Eliminar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* La rutina ya existe en el Drive: se guarda con otro nombre en vez de pisarla */}
+      <Dialog
+        open={conflicto !== null}
+        onOpenChange={(open) => { if (!open && !guardandoConflicto) setConflicto(null) }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Ya hay una rutina en el Drive</DialogTitle>
+            <DialogDescription>
+              {nombreAlumno} ya tiene una rutina guardada en tu Drive. Para no perderla, guardá
+              esta con otro nombre.
+            </DialogDescription>
+          </DialogHeader>
+          {conflicto && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-start gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3">
+                <TriangleAlert className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div className="min-w-0 text-sm">
+                  <p className="font-medium">Archivo existente</p>
+                  <p className="text-muted-foreground break-all">{conflicto.existente}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="rutina-archivo" className="text-sm font-medium">
+                  Guardar la nueva rutina como
+                </label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="rutina-archivo"
+                    value={conflicto.nombre}
+                    onChange={(e) => {
+                      const nombre = e.target.value
+                      setConflictoError('')
+                      setConflicto(prev => prev && { ...prev, nombre })
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && void handleGuardarConOtroNombre()}
+                    maxLength={150}
+                    autoFocus
+                  />
+                  <span className="text-sm text-muted-foreground shrink-0">.xlsx</span>
+                </div>
+              </div>
+              {conflictoError && <p className="text-sm text-destructive">{conflictoError}</p>}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConflicto(null)} disabled={guardandoConflicto}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void handleGuardarConOtroNombre()}
+              disabled={guardandoConflicto || !limpiarNombreArchivo(conflicto?.nombre ?? '')}
+            >
+              {guardandoConflicto ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <CloudUpload className="h-4 w-4 mr-2" />
+                  Guardar con este nombre
                 </>
               )}
             </Button>

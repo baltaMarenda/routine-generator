@@ -5,6 +5,9 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 const FOLDER_CACHE_LS_KEY = 'goblet_drive_folder_cache'
 
+/** Escapa un valor para meterlo entre comillas simples en una consulta `q` de Drive. */
+const escaparQ = (valor: string) => valor.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+
 /**
  * Cada profesor exporta a su propio Drive y en una misma PC pueden entrar varios:
  * la caché de ids de carpetas va separada por cuenta de Google, si no una cuenta
@@ -63,7 +66,7 @@ export async function getOrCreateFolder(
     : " and 'root' in parents"
 
   const q = encodeURIComponent(
-    `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentClause}`
+    `name='${escaparQ(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentClause}`
   )
   const { files } = await apiFetch(
     accessToken,
@@ -97,7 +100,7 @@ export async function getOrCreateFolder(
  * missing folders. This is the single folder every file for a student lands in:
  * routine, evaluation and photos.
  */
-async function getStudentFolderId(
+export async function getStudentFolderId(
   accessToken: string,
   profesor: string,
   dia: string,
@@ -118,7 +121,7 @@ export async function findFileId(
   filename: string
 ): Promise<string | null> {
   const q = encodeURIComponent(
-    `name='${filename}' and '${folderId}' in parents and trashed=false`
+    `name='${escaparQ(filename)}' and '${folderId}' in parents and trashed=false`
   )
   const { files } = await apiFetch(
     accessToken,
@@ -248,24 +251,31 @@ export async function writeEvaluationXlsxToDrive(
   await uploadBinaryFile(accessToken, folderId, filename, XLSX_MIME, buffer, existingId)
 }
 
+/** Nombres de los archivos (no carpetas) que hay en `folderId`. */
+export async function listFileNames(accessToken: string, folderId: string): Promise<string[]> {
+  const q = encodeURIComponent(
+    `'${folderId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false`
+  )
+  const { files } = await apiFetch(
+    accessToken,
+    `${DRIVE_API}/files?q=${q}&fields=files(name)&pageSize=1000`
+  ) as { files: { name: string }[] }
+  return files.map(f => f.name)
+}
+
 /**
- * Uploads an xlsx buffer to
- * GOBLET/{profesor}/{dia}/{horario}/{studentName}/{studentName}_Rutina.xlsx.
- * If the file already exists it is replaced (PATCH); otherwise created (POST).
+ * Sube una rutina como archivo NUEVO en la carpeta del alumno. A diferencia de la
+ * evaluación, nunca reemplaza: una rutina anterior con el mismo nombre se perdería.
+ * El que llama elige un nombre libre (ver listFileNames).
  * Returns the file's id and webViewLink so they can be recorded in the DB.
  */
 export async function writeRoutineXlsxToDrive(
   accessToken: string,
-  profesor: string,
-  dia: string,
-  horario: string,
-  studentName: string,
+  folderId: string,
+  filename: string,
   buffer: Buffer
 ): Promise<DriveFile> {
-  const folderId = await getStudentFolderId(accessToken, profesor, dia, horario, studentName)
-  const filename = `${studentName}_Rutina.xlsx`
-  const existingId = await findFileId(accessToken, folderId, filename)
-  return uploadBinaryFile(accessToken, folderId, filename, XLSX_MIME, buffer, existingId)
+  return uploadBinaryFile(accessToken, folderId, filename, XLSX_MIME, buffer)
 }
 
 /**
@@ -278,7 +288,7 @@ export async function findFolderId(
   parentId: string
 ): Promise<string | null> {
   const q = encodeURIComponent(
-    `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentId}' in parents`
+    `name='${escaparQ(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentId}' in parents`
   )
   const { files } = await apiFetch(
     accessToken,
