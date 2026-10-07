@@ -49,6 +49,13 @@ export const createEmptyBlock = (name: string): Block => ({
 
 export const blockNames = ['Bloque A', 'Bloque B', 'Bloque C', 'Bloque D', 'Bloque E', 'Bloque F']
 
+// Los nombres dependen solo de la posición: al borrar uno, los siguientes se corren
+export const renumberBlocks = (blocks: Block[]): Block[] =>
+  blocks.map((b, i) => ({ ...b, name: blockNames[i] ?? `Bloque ${i + 1}` }))
+
+export const renumberDays = (days: DayRoutine[]): DayRoutine[] =>
+  days.map((d, i) => ({ ...d, name: `Día ${i + 1}` }))
+
 export const createEmptyDay = (dayNumber: number): DayRoutine => ({
   id: crypto.randomUUID(),
   name: `Día ${dayNumber}`,

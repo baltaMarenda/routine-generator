@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, GripVertical } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Header } from './header'
 import { Conditioning } from './conditioning'
 import { ExerciseBlock } from './exercise-block'
 import type { RoutineData, DayRoutine, Block } from '@/lib/types'
-import { createEmptyBlock, blockNames, createEmptyDay } from '@/lib/types'
+import { createEmptyBlock, blockNames, createEmptyDay, renumberBlocks, renumberDays } from '@/lib/types'
 
 interface RoutineBuilderProps {
   data: RoutineData
@@ -71,7 +72,7 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
       ...data,
       days: data.days.map(d => 
         d.id === dayId 
-          ? { ...d, blocks: d.blocks.filter(b => b.id !== blockId) }
+          ? { ...d, blocks: renumberBlocks(d.blocks.filter(b => b.id !== blockId)) }
           : d
       )
     })
@@ -80,15 +81,12 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
   const addBlock = (dayId: string) => {
     const day = data.days.find(d => d.id === dayId)
     if (!day) return
-    
-    const usedNames = new Set(day.blocks.map(b => b.name))
-    const nextName = blockNames.find(name => !usedNames.has(name)) || `Bloque ${day.blocks.length + 1}`
-    
+
     onChange({
       ...data,
-      days: data.days.map(d => 
-        d.id === dayId 
-          ? { ...d, blocks: [...d.blocks, createEmptyBlock(nextName)] }
+      days: data.days.map(d =>
+        d.id === dayId
+          ? { ...d, blocks: renumberBlocks([...d.blocks, createEmptyBlock('')]) }
           : d
       )
     })
@@ -98,15 +96,15 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
     const newDay = createEmptyDay(data.days.length + 1)
     onChange({
       ...data,
-      days: [...data.days, newDay]
+      days: renumberDays([...data.days, newDay])
     })
     setActiveDay(newDay.id)
   }
 
   const removeDay = (dayId: string) => {
     if (data.days.length <= 1) return
-    
-    const newDays = data.days.filter(d => d.id !== dayId)
+
+    const newDays = renumberDays(data.days.filter(d => d.id !== dayId))
     onChange({
       ...data,
       days: newDays
@@ -115,6 +113,43 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
     if (activeDay === dayId) {
       setActiveDay(newDays[0]?.id || '')
     }
+  }
+
+  // Arrastrar y soltar (HTML5 nativo). Al soltar se renumera, así los nombres siguen la posición
+  const [dragging, setDragging] = useState<{ kind: 'day' | 'block'; id: string; dayId?: string } | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  // Un bloque solo es arrastrable mientras se agarra su manija, para no romper la edición de los inputs
+  const [grabbedBlockId, setGrabbedBlockId] = useState<string | null>(null)
+
+  const endDrag = () => {
+    setDragging(null)
+    setDragOverId(null)
+    setGrabbedBlockId(null)
+  }
+
+  const moveItem = <T extends { id: string }>(items: T[], fromId: string, toId: string): T[] => {
+    const from = items.findIndex(i => i.id === fromId)
+    const to = items.findIndex(i => i.id === toId)
+    if (from === -1 || to === -1 || from === to) return items
+    const result = [...items]
+    const [moved] = result.splice(from, 1)
+    result.splice(to, 0, moved)
+    return result
+  }
+
+  const reorderDays = (fromId: string, toId: string) => {
+    if (fromId === toId) return
+    onChange({ ...data, days: renumberDays(moveItem(data.days, fromId, toId)) })
+  }
+
+  const reorderBlocks = (dayId: string, fromId: string, toId: string) => {
+    if (fromId === toId) return
+    onChange({
+      ...data,
+      days: data.days.map(d =>
+        d.id === dayId ? { ...d, blocks: renumberBlocks(moveItem(d.blocks, fromId, toId)) } : d
+      )
+    })
   }
 
   const currentDay = data.days?.find(d => d.id === activeDay)
@@ -134,24 +169,46 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
         <div className="flex items-center gap-2 mb-4">
           <TabsList className="flex-1 justify-start h-auto flex-wrap">
             {data.days.map((day) => (
-              <TabsTrigger 
-                key={day.id} 
-                value={day.id}
-                className="relative group pr-8"
-              >
-                {day.name}
+              <div key={day.id} className="relative group flex flex-1">
+                <TabsTrigger
+                  value={day.id}
+                  draggable={data.days.length > 1}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', day.id)
+                    setDragging({ kind: 'day', id: day.id })
+                  }}
+                  onDragOver={(e) => {
+                    if (dragging?.kind !== 'day') return
+                    e.preventDefault()
+                    setDragOverId(day.id)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    if (dragging?.kind === 'day') reorderDays(dragging.id, day.id)
+                    endDrag()
+                  }}
+                  onDragEnd={endDrag}
+                  className={cn(
+                    'pr-8',
+                    data.days.length > 1 && 'cursor-grab active:cursor-grabbing',
+                    dragging?.id === day.id && 'opacity-50',
+                    dragging?.kind === 'day' && dragOverId === day.id && dragging.id !== day.id && 'ring-2 ring-primary'
+                  )}
+                >
+                  {day.name}
+                </TabsTrigger>
                 {data.days.length > 1 && (
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeDay(day.id)
-                    }}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+                    type="button"
+                    aria-label={`Eliminar ${day.name}`}
+                    onClick={() => removeDay(day.id)}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-destructive transition-opacity"
                   >
                     <X className="h-3 w-3" />
                   </button>
                 )}
-              </TabsTrigger>
+              </div>
             ))}
           </TabsList>
           <Button variant="outline" size="sm" onClick={addDay}>
@@ -188,14 +245,51 @@ export function RoutineBuilder({ data, onChange }: RoutineBuilderProps) {
 
             {/* Exercise blocks */}
             {day.blocks.map((block) => (
-              <ExerciseBlock 
+              <div
                 key={block.id}
-                block={block}
-                onUpdate={(updated) => updateBlock(day.id, block.id, updated)}
-                onDelete={() => deleteBlock(day.id, block.id)}
-                canDelete={day.blocks.length > 1}
-                exercises={exercises}
-              />
+                draggable={grabbedBlockId === block.id}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', block.id)
+                  setDragging({ kind: 'block', id: block.id, dayId: day.id })
+                }}
+                onDragOver={(e) => {
+                  if (dragging?.kind !== 'block' || dragging.dayId !== day.id) return
+                  e.preventDefault()
+                  setDragOverId(block.id)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  if (dragging?.kind === 'block' && dragging.dayId === day.id) {
+                    reorderBlocks(day.id, dragging.id, block.id)
+                  }
+                  endDrag()
+                }}
+                onDragEnd={endDrag}
+                className={cn(
+                  'rounded',
+                  dragging?.id === block.id && 'opacity-50',
+                  dragging?.kind === 'block' && dragOverId === block.id && dragging.id !== block.id && 'ring-2 ring-primary'
+                )}
+              >
+                <ExerciseBlock
+                  block={block}
+                  onUpdate={(updated) => updateBlock(day.id, block.id, updated)}
+                  onDelete={() => deleteBlock(day.id, block.id)}
+                  canDelete={day.blocks.length > 1}
+                  exercises={exercises}
+                  dragHandle={day.blocks.length > 1 && (
+                    <span
+                      onMouseDown={() => setGrabbedBlockId(block.id)}
+                      onMouseUp={() => setGrabbedBlockId(null)}
+                      className="cursor-grab active:cursor-grabbing text-primary-foreground/70 hover:text-primary-foreground"
+                      title="Arrastrar para reordenar"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                  )}
+                />
+              </div>
             ))}
 
             {/* Add new block button */}
