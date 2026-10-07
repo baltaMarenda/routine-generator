@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Plus, Trash2 } from 'lucide-react'
@@ -14,9 +15,10 @@ interface ExerciseBlockProps {
   onDelete: () => void
   canDelete: boolean
   exercises: string[]
+  dragHandle?: ReactNode
 }
 
-export function ExerciseBlock({ block, onUpdate, onDelete, canDelete, exercises }: ExerciseBlockProps) {
+export function ExerciseBlock({ block, onUpdate, onDelete, canDelete, exercises, dragHandle }: ExerciseBlockProps) {
   const updateExercise = (exerciseId: string, updates: Partial<Exercise>) => {
     onUpdate({
       ...block,
@@ -62,7 +64,10 @@ export function ExerciseBlock({ block, onUpdate, onDelete, canDelete, exercises 
         <tr>
           <th className="border border-border bg-primary text-primary-foreground text-left px-3 py-2 font-semibold" colSpan={2}>
             <div className="flex items-center justify-between">
-              <span>{block.name}</span>
+              <span className="flex items-center gap-2">
+                {dragHandle}
+                {block.name}
+              </span>
               {canDelete && (
                 <button onClick={onDelete} className="text-primary-foreground/70 hover:text-primary-foreground">
                   <Trash2 className="h-4 w-4" />

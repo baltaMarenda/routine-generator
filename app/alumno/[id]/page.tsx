@@ -95,8 +95,12 @@ function descargar(buffer: Buffer, filename: string) {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  // Safari y Firefox necesitan el link en el DOM, y revocar la URL en el mismo
+  // tick cancela la descarga antes de que empiece.
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 export default function AlumnoPage({ params }: AlumnoPageProps) {
@@ -511,16 +515,23 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
 
   const handleDownload = async () => {
     const nombre = alumno?.nombre ?? 'Alumno'
-    if (activeTab === 'evaluacion') {
-      const fotosActuales = fotos.map(f => f.dataUrl)
-      descargar(
-        await exportEvaluationToExcel({ ...evaluation, registroFotografico: fotosActuales }),
-        `${nombre}_Evaluacion.xlsx`
-      )
-      toast.success('Excel de la evaluación descargado exitosamente')
-    } else {
-      descargar(await exportRoutineToExcel(routine), `${nombre}_Rutina.xlsx`)
-      toast.success('Excel de la rutina descargado exitosamente')
+    try {
+      if (activeTab === 'evaluacion') {
+        const fotosActuales = fotos.map(f => f.dataUrl)
+        descargar(
+          await exportEvaluationToExcel({ ...evaluation, registroFotografico: fotosActuales }),
+          `${nombre}_Evaluacion.xlsx`
+        )
+        toast.success('Excel de la evaluación descargado exitosamente')
+      } else {
+        descargar(await exportRoutineToExcel(routine), `${nombre}_Rutina.xlsx`)
+        toast.success('Excel de la rutina descargado exitosamente')
+      }
+    } catch (err) {
+      console.error('Error al generar el Excel:', err)
+      toast.error('No se pudo generar el Excel', {
+        description: err instanceof Error ? err.message : undefined,
+      })
     }
   }
 
