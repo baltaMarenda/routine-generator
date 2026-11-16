@@ -25,6 +25,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   Loader2,
+  Pencil,
   Share2,
   Trash2,
   TriangleAlert,
@@ -41,6 +42,7 @@ import {
   deleteStudentFolderFromDrive,
   getStudentFolderId,
   listFileNames,
+  renameStudentInDrive,
   writeEvaluationXlsxToDrive,
   writeRoutineXlsxToDrive,
   writeStudentPhotosToDrive,
@@ -152,6 +154,11 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
   const [conflicto, setConflicto] = useState<ConflictoRutina | null>(null)
   const [conflictoError, setConflictoError] = useState('')
   const [guardandoConflicto, setGuardandoConflicto] = useState(false)
+
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [nuevoNombre, setNuevoNombre] = useState('')
+  const [renaming, setRenaming] = useState(false)
+  const [renameError, setRenameError] = useState('')
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -478,6 +485,76 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
   }
 
   /**
+   * Cambia el nombre del alumno en la BD y, si ya se exportó a tu Drive, renombra
+   * su carpeta y los archivos "{nombre}_..." de adentro. Los nombres que figuran
+   * en la evaluación y la rutina se actualizan si eran el nombre viejo (el
+   * autoguardado los manda a la BD).
+   */
+  const handleRename = async () => {
+    if (!alumno) return
+    const viejo = alumno.nombre
+    const nuevo = nuevoNombre.trim()
+    if (!nuevo) return
+    if (nuevo === viejo) {
+      setRenameOpen(false)
+      return
+    }
+
+    setRenaming(true)
+    setRenameError('')
+    try {
+      await api(`/api/alumnos/${alumnoId}`, { method: 'PATCH', json: { nombre: nuevo } })
+    } catch (err) {
+      setRenameError(mensajeDeError(err, 'No se pudo cambiar el nombre. Revisá la conexión e intentá de nuevo.'))
+      setRenaming(false)
+      return
+    }
+
+    setAlumno(prev => prev && { ...prev, nombre: nuevo })
+    const eraViejo = (valor: string | undefined) => !valor?.trim() || valor.trim() === viejo
+    setEvaluation(prev =>
+      eraViejo(prev.patientData.nombreApellido)
+        ? { ...prev, patientData: { ...prev.patientData, nombreApellido: nuevo } }
+        : prev
+    )
+    setRoutine(prev => (eraViejo(prev.clientName) ? { ...prev, clientName: nuevo } : prev))
+
+    const carpetaProfesor = alumno.profesor || nombreUsuario
+    let aviso: { tipo: 'success' | 'warning'; descripcion?: string } = { tipo: 'success' }
+    if (drive.estado === 'conectado' && carpetaProfesor && alumno.dia && alumno.horario) {
+      try {
+        const accessToken = await drive.obtenerToken()
+        const resultado = await renameStudentInDrive(
+          accessToken, carpetaProfesor, alumno.dia, alumno.horario, viejo, nuevo
+        )
+        if (resultado === 'renombrado') {
+          aviso = { tipo: 'success', descripcion: 'También se renombró su carpeta en tu Drive.' }
+        } else if (resultado === 'ya-existe') {
+          aviso = {
+            tipo: 'warning',
+            descripcion: `En tu Drive ya hay una carpeta "${nuevo}" en ese horario, así que la de "${viejo}" quedó como estaba.`,
+          }
+        }
+      } catch (err) {
+        console.error('No se pudo renombrar la carpeta de Drive:', err)
+        aviso = {
+          tipo: 'warning',
+          descripcion: `No se pudo renombrar la carpeta en tu Drive; sigue llamándose "${viejo}".`,
+        }
+      }
+    } else if (drive.estado !== 'conectado' && alumno.dia && alumno.horario) {
+      aviso = {
+        tipo: 'warning',
+        descripcion: 'Drive no está conectado: la carpeta del Drive sigue con el nombre anterior.',
+      }
+    }
+
+    toast[aviso.tipo]('Nombre actualizado', { description: aviso.descripcion })
+    setRenaming(false)
+    setRenameOpen(false)
+  }
+
+  /**
    * Borra al alumno de la BD (con su evaluación, fotos, rutina y accesos) y vuelve
    * al listado. La carpeta del Drive de quien lo elimina va a la papelera; las
    * copias que otros profesores hayan exportado a sus Drive quedan donde están.
@@ -582,7 +659,25 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
                 </Button>
               </Link>
               <div className="min-w-0">
-                <h1 className="text-xl font-bold text-foreground truncate">{nombreAlumno}</h1>
+                <div className="flex items-center gap-1 min-w-0">
+                  <h1 className="text-xl font-bold text-foreground truncate">{nombreAlumno}</h1>
+                  {carga === 'listo' && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      aria-label="Editar nombre del alumno"
+                      title="Editar nombre"
+                      onClick={() => {
+                        setNuevoNombre(nombreAlumno)
+                        setRenameError('')
+                        setRenameOpen(true)
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground truncate">
                   {compartidoPor ? `Ficha compartida por ${compartidoPor}` : 'Ficha del alumno'}
                 </p>
@@ -822,6 +917,44 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cambiar el nombre del alumno (BD + carpeta de tu Drive) */}
+      <Dialog open={renameOpen} onOpenChange={(open) => { if (!renaming) setRenameOpen(open) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar nombre del alumno</DialogTitle>
+            <DialogDescription>
+              Si ya lo guardaste en tu Drive, también se renombran su carpeta y sus archivos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={nuevoNombre}
+              onChange={(e) => { setNuevoNombre(e.target.value); setRenameError('') }}
+              onKeyDown={(e) => e.key === 'Enter' && void handleRename()}
+              placeholder="Nombre y apellido"
+              maxLength={100}
+              autoFocus
+            />
+            {renameError && <p className="text-sm text-destructive">{renameError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameOpen(false)} disabled={renaming}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleRename()} disabled={renaming || !nuevoNombre.trim()}>
+              {renaming ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                'Guardar'
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

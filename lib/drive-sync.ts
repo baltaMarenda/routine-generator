@@ -349,3 +349,64 @@ export async function deleteStudentFolderFromDrive(
   await trashDriveFile(accessToken, studentId)
   forgetCachedFolder(studentId)
 }
+
+/** Qué pasó al renombrar la carpeta de un alumno en el Drive. */
+export type ResultadoRenombrar = 'renombrado' | 'sin-carpeta' | 'ya-existe'
+
+/**
+ * Renombra GOBLET/{profesor}/{dia}/{horario}/{viejo}/ a {nuevo}/ y, adentro, los
+ * archivos que empiezan con "{viejo}_" (rutinas, evaluación y fotos) para que
+ * empiecen con "{nuevo}_". Los ids de Drive no cambian, así que los links
+ * guardados en la BD siguen andando. No crea nada: si la carpeta no existe no
+ * hace nada, y si ya hay una carpeta con el nombre nuevo no la toca (no mezclamos
+ * dos alumnos).
+ */
+export async function renameStudentInDrive(
+  accessToken: string,
+  profesor: string,
+  dia: string,
+  horario: string,
+  viejo: string,
+  nuevo: string
+): Promise<ResultadoRenombrar> {
+  const rootId = await getOrCreateFolder(accessToken, ROOT_FOLDER)
+  const profesorId = await findFolderId(accessToken, profesor, rootId)
+  if (!profesorId) return 'sin-carpeta'
+  const diaId = await findFolderId(accessToken, dia, profesorId)
+  if (!diaId) return 'sin-carpeta'
+  const horarioId = await findFolderId(accessToken, horario, diaId)
+  if (!horarioId) return 'sin-carpeta'
+  const studentId = await findFolderId(accessToken, viejo, horarioId)
+  if (!studentId) return 'sin-carpeta'
+
+  // Si sólo cambian mayúsculas, Drive la encuentra igual: es la misma carpeta.
+  const destino = await findFolderId(accessToken, nuevo, horarioId)
+  if (destino && destino !== studentId) return 'ya-existe'
+
+  const renombrar = (fileId: string, name: string) =>
+    apiFetch(accessToken, `${DRIVE_API}/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+
+  const q = encodeURIComponent(`'${studentId}' in parents and trashed=false`)
+  const { files } = await apiFetch(
+    accessToken,
+    `${DRIVE_API}/files?q=${q}&fields=files(id,name)&pageSize=1000`
+  ) as { files: { id: string; name: string }[] }
+
+  const prefijo = `${viejo}_`
+  await Promise.all(
+    files
+      .filter(f => f.name.startsWith(prefijo))
+      .map(f => renombrar(f.id, `${nuevo}_${f.name.slice(prefijo.length)}`))
+  )
+  await renombrar(studentId, nuevo)
+
+  forgetCachedFolder(studentId)
+  const cache = readFolderCache()
+  cache[`${horarioId}/${nuevo}`] = studentId
+  writeFolderCache(cache)
+  return 'renombrado'
+}

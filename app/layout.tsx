@@ -21,7 +21,13 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    // La app está en español. Con lang="en" Chrome ofrecía traducirla, y el
+    // traductor reemplaza los textos por sus propios nodos: cuando React cambia
+    // un texto (p. ej. "Guardar" → "Guardando...") la página entera se cae.
+    <html lang="es" translate="no">
+      <head>
+        <meta name="google" content="notranslate" />
+      </head>
       <body className="font-sans antialiased">
         <SessionProvider>
           {children}

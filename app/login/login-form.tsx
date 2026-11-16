@@ -32,8 +32,14 @@ export function LoginForm() {
 
     setLoading(false)
 
+    // "CredentialsSignin" es usuario/contraseña mal; cualquier otro error es del
+    // servidor (p. ej. sin DATABASE_URL o la BD caída) y no hay que culpar a la clave.
     if (!result || result.error) {
-      setError('Usuario o contraseña incorrectos')
+      setError(
+        result?.error === 'CredentialsSignin'
+          ? 'Usuario o contraseña incorrectos'
+          : 'No se pudo iniciar sesión: el servidor no responde. Intentá de nuevo en un rato.'
+      )
       return
     }
 
