@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
+import posthog from 'posthog-js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -121,7 +122,10 @@ export default function CambiarPasswordPage() {
             )}
             <button
               type="button"
-              onClick={() => void signOut({ callbackUrl: '/login' })}
+              onClick={() => {
+                posthog.reset()
+                void signOut({ callbackUrl: '/login' })
+              }}
               className="text-muted-foreground hover:text-foreground"
             >
               Salir

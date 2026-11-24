@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import posthog from 'posthog-js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -65,6 +66,7 @@ export default function UsuariosPage() {
     setNuevoError('')
     try {
       await api('/api/usuarios', { method: 'POST', json: nuevo })
+      posthog.capture('teacher_created')
       setAviso(
         `Se creó a ${nuevo.nombre.trim()}. Pasale su usuario y contraseña: la va a tener que cambiar la primera vez que entre.`
       )
@@ -87,6 +89,7 @@ export default function UsuariosPage() {
         method: 'POST',
         json: { passwordTemporal },
       })
+      posthog.capture('teacher_password_reset')
       setAviso(
         `Listo. Pasale la contraseña temporal a ${reseteando.nombre}: la va a tener que cambiar al entrar.`
       )
@@ -105,6 +108,7 @@ export default function UsuariosPage() {
     setAccionError('')
     try {
       await api(`/api/usuarios/${usuario.id}`, { method: 'PATCH', json: { activo: !usuario.activo } })
+      posthog.capture('teacher_status_updated', { is_active: !usuario.activo })
       await cargar()
     } catch (err) {
       setAccionError(mensajeDeError(err, 'No se pudo actualizar el usuario.'))

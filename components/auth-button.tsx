@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
+import posthog from 'posthog-js'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -126,7 +127,12 @@ export function AuthButton({ syncStatus = 'idle' }: AuthButtonProps) {
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void signOut({ callbackUrl: '/login' })}>
+          <DropdownMenuItem
+            onSelect={() => {
+              posthog.reset()
+              void signOut({ callbackUrl: '/login' })
+            }}
+          >
             <LogOut className="h-4 w-4 mr-2" />
             Salir
           </DropdownMenuItem>
