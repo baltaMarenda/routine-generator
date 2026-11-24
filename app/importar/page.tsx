@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import posthog from 'posthog-js'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -61,6 +62,9 @@ export default function ImportarPage() {
     setError('')
     setResultados([])
     const listos: string[] = []
+    let importados = 0
+    let existentes = 0
+    let fallidos = 0
 
     for (const anterior of alumnos) {
       try {
@@ -93,8 +97,11 @@ export default function ImportarPage() {
         }
 
         listos.push(anterior.legacyId)
+        if (res.estado === 'importado') importados++
+        else existentes++
         setResultados(prev => [...prev, { ...anterior, estado: res.estado, detalle }])
       } catch (err) {
+        fallidos++
         console.error(`Error al importar a ${anterior.nombre}:`, err)
         setResultados(prev => [
           ...prev,
@@ -104,6 +111,11 @@ export default function ImportarPage() {
     }
 
     limpiarCacheAnterior(listos)
+    posthog.capture('legacy_import_completed', {
+      imported_count: importados,
+      existing_count: existentes,
+      failed_count: fallidos,
+    })
     setImportando(false)
   }
 

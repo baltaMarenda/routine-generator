@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, use } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import posthog from 'posthog-js'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -338,6 +339,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
     try {
       const { datos } = await api<{ datos: RoutineData }>(`/api/rutinas/${origen.id}`)
       setRoutine({ ...datos, clientName: alumno?.nombre ?? datos.clientName })
+      posthog.capture('routine_copied')
       setCopyDialogOpen(false)
     } catch (err) {
       setCopyError(mensajeDeError(err, 'No se pudo leer la rutina.'))
@@ -359,6 +361,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
         json: { username },
       })
       setAccesos(nuevos)
+      posthog.capture('routine_shared')
       setShareUsername('')
       setShareOk(`Listo: @${username.toLowerCase()} ya puede ver y editar la rutina.`)
     } catch (err) {
@@ -382,6 +385,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
   }
 
   const avisarGuardado = (target: 'evaluacion' | 'rutina', detalle?: string) => {
+    posthog.capture('drive_export_completed', { export_type: target })
     setSyncStatus('saved')
     setTimeout(() => setSyncStatus('idle'), 2500)
     toast.success(
@@ -510,6 +514,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
       return
     }
 
+    posthog.capture('student_renamed')
     setAlumno(prev => prev && { ...prev, nombre: nuevo })
     const eraViejo = (valor: string | undefined) => !valor?.trim() || valor.trim() === viejo
     setEvaluation(prev =>
@@ -576,6 +581,8 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
       return
     }
 
+    posthog.capture('student_deleted')
+
     const carpetaProfesor = alumno.profesor || nombreUsuario
     if (drive.estado === 'conectado' && carpetaProfesor && alumno.dia && alumno.horario) {
       try {
@@ -604,6 +611,7 @@ export default function AlumnoPage({ params }: AlumnoPageProps) {
         descargar(await exportRoutineToExcel(routine), `${nombre}_Rutina.xlsx`)
         toast.success('Excel de la rutina descargado exitosamente')
       }
+      posthog.capture('excel_downloaded', { export_type: activeTab })
     } catch (err) {
       console.error('Error al generar el Excel:', err)
       toast.error('No se pudo generar el Excel', {

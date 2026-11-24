@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import Link from 'next/link'
 import { TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import posthog from 'posthog-js'
 
 /**
  * Si algo falla al dibujar una página, se muestra esto en vez de la pantalla
@@ -18,6 +19,7 @@ export default function ErrorPagina({
   reset: () => void
 }) {
   useEffect(() => {
+    posthog.captureException(error)
     console.error('Error en la página:', error)
   }, [error])
 

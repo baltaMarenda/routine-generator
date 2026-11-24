@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
+import posthog from 'posthog-js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +57,7 @@ export default function AlumnosPage() {
     setSaveError('')
     try {
       const { id } = await api<{ id: string }>('/api/alumnos', { method: 'POST', json: { nombre } })
+      posthog.capture('student_created')
       setAlumnos(prev =>
         ordenarPorNombre([
           ...prev,
